@@ -1,5 +1,4 @@
 name: Build FrankenPHP Latest Release
-
 on:
   workflow_dispatch:  # Allows manual triggering
   
@@ -19,7 +18,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config
-
+          
       - name: Clone FrankenPHP
         run: |
           echo "Building FrankenPHP release: ${{ steps.get_release.outputs.tag_name }}"
@@ -31,10 +30,9 @@ jobs:
           # Create a backup of the original script
           cp build-static.sh build-static.sh.bak
           
-          # Fix the quoting in the script if needed
-          # This modifies the script to properly escape version strings
-          sed -i 's/-X \x27github.com\/caddyserver\/caddy\/v2.CustomVersion=FrankenPHP/-X "github.com\/caddyserver\/caddy\/v2.CustomVersion=FrankenPHP/g' build-static.sh
-          sed -i 's/ PHP [0-9.]\+ Caddy\x27/ PHP"/' build-static.sh
+          # Fix the quoting in the script correctly
+          sed -i 's/-X '"'"'github.com\/caddyserver\/caddy\/v2.CustomVersion=FrankenPHP/-X "github.com\/caddyserver\/caddy\/v2.CustomVersion=FrankenPHP/g' build-static.sh
+          sed -i 's/ PHP [0-9.]\+ Caddy'"'"'/ PHP"/g' build-static.sh
           
           # Make the script executable
           chmod +x build-static.sh
