@@ -15,72 +15,28 @@ jobs:
           echo "Latest FrankenPHP release: $LATEST_VERSION"
           echo "tag_name=$LATEST_VERSION" >> $GITHUB_OUTPUT
       
-      - name: Install build dependencies
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      
+      - name: Build FrankenPHP using Docker
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config golang php
-
-      - name: Clone FrankenPHP
-        run: |
-          echo "Building FrankenPHP release: ${{ steps.get_release.outputs.tag_name }}"
-          git clone https://github.com/dunglas/frankenphp
-          cd frankenphp
+          # Use Docker to build FrankenPHP
+          docker buildx bake --load static-builder-gnu
           
-          # Print the script content to understand it better
-          echo "Contents of build-static.sh:"
-          cat build-static.sh
+          # Create a temporary directory for the output
+          mkdir -p frankenphp-build
           
-      - name: Create custom build script
-        run: |
-          cd frankenphp
+          # Extract the binary from the Docker container
+          CONTAINER_ID=$(docker create --name static-builder-gnu dunglas/frankenphp:static-builder-gnu)
+          docker cp ${CONTAINER_ID}:/go/src/app/dist/frankenphp-linux-$(uname -m) frankenphp-build/
+          docker rm static-builder-gnu
           
-          # Create a custom build script that handles the version string properly
-          cat > custom-build.sh << 'EOF'
-          #!/bin/bash
-          set -e
-          
-          # Create dist directory
-          mkdir -p dist
-          
-          # Get Git commit hash
-          GIT_COMMIT=$(git rev-parse HEAD)
-          
-          # Get PHP version without deprecation notices
-          PHP_VERSION=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION.".".PHP_RELEASE_VERSION;' 2>/dev/null)
-          
-          echo "Building FrankenPHP with:"
-          echo "Git commit: $GIT_COMMIT"
-          echo "PHP version: $PHP_VERSION"
-          
-          # Build with properly escaped version string
-          go build \
-            -o dist/frankenphp-linux-x86_64 \
-            -buildmode=pie \
-            -tags cgo,netgo,osusergo,static_build,nobadger,nomysql,nopgx \
-            -ldflags "-linkmode=external -extldflags '-static-pie -Wl,-z,stack-size=0x80000' -w -s -X \"github.com/caddyserver/caddy/v2.CustomVersion=FrankenPHP ${GIT_COMMIT} PHP ${PHP_VERSION} Caddy\""
-          
-          echo "Build completed. Binary at dist/frankenphp-linux-x86_64"
-          EOF
-          
-          chmod +x custom-build.sh
-          
-      - name: Build FrankenPHP with custom script
-        run: |
-          cd frankenphp
-          ./custom-build.sh
-          
-          # Verify the binary was created
-          if [ -f "dist/frankenphp-linux-x86_64" ]; then
-            echo "Build successful, binary created"
-            ls -la dist/
-          else
-            echo "Build failed, no binary created"
-            exit 1
-          fi
-          
+          # List files to verify
+          ls -la frankenphp-build/
+      
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: frankenphp-${{ steps.get_release.outputs.tag_name }}
-          path: frankenphp/dist/
+          path: frankenphp-build/
           retention-days: 7
