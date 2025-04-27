@@ -1,0 +1,49 @@
+name: Build FrankenPHP binaries
+
+on:
+  workflow_dispatch:  # Allows manual triggering
+  schedule:
+    # Check daily at midnight UTC
+    - cron: '0 0 * * *'
+  
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for new releases
+        id: check_release
+        run: |
+          # Get latest release info
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/dunglas/frankenphp/releases/latest)
+          LATEST_VERSION=$(echo $LATEST_RELEASE | jq -r .tag_name)
+          RELEASE_DATE=$(echo $LATEST_RELEASE | jq -r .published_at)
+          
+          # Convert to seconds for comparison
+          RELEASE_TIMESTAMP=$(date -d "$RELEASE_DATE" +%s)
+          CURRENT_TIMESTAMP=$(date +%s)
+          SECONDS_DIFF=$((CURRENT_TIMESTAMP - RELEASE_TIMESTAMP))
+          HOURS_DIFF=$((SECONDS_DIFF / 3600))
+          
+          # Only proceed if release is within last 24 hours
+          if [ $HOURS_DIFF -le 24 ]; then
+            echo "New release found: $LATEST_VERSION from $RELEASE_DATE"
+            echo "is_new_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "No new release within last 24 hours"
+            echo "is_new_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Clone and build FrankenPHP
+        if: steps.check_release.outputs.is_new_release == 'true'
+        run: |
+          git clone https://github.com/dunglas/frankenphp
+          cd frankenphp
+          ./build-static.sh
+          
+      - name: Upload build artifacts
+        if: steps.check_release.outputs.is_new_release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: frankenphp-build
+          path: frankenphp/dist/
+          retention-days: 7
