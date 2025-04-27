@@ -25,30 +25,50 @@ jobs:
           echo "Building FrankenPHP release: ${{ steps.get_release.outputs.tag_name }}"
           git clone https://github.com/dunglas/frankenphp
           
-      - name: Build FrankenPHP
-        id: build
-        continue-on-error: true
+      - name: Fix build script
         run: |
           cd frankenphp
-          # Set IGNORE_DEPRECATION_WARNINGS to suppress PHP deprecation notices
-          export IGNORE_DEPRECATION_WARNINGS=1
-          ./build-static.sh
           
-          # Check if build artifacts exist
-          if [ -d "dist" ] && [ "$(ls -A dist)" ]; then
-            echo "build_success=true" >> $GITHUB_OUTPUT
-          else
-            echo "build_success=false" >> $GITHUB_OUTPUT
+          # Create a backup of the original script
+          cp build-static.sh build-static.sh.original
+          
+          # Examine the script
+          echo "Examining build script content:"
+          grep -i "CustomVersion" build-static.sh || echo "CustomVersion not found in script"
+          
+          # Modify the script to fix the quoting issue
+          sed -i 's/-X github.com\/caddyserver\/caddy\/v2.CustomVersion=/-X "github.com\/caddyserver\/caddy\/v2.CustomVersion=/' build-static.sh
+          sed -i 's/ Caddy/ Caddy"/' build-static.sh
+          
+          # Check the modified script
+          echo "Modified script content:"
+          grep -i "CustomVersion" build-static.sh || echo "CustomVersion not found in modified script"
+          
+          # Alternatively, use a more targeted approach if the sed command doesn't work
+          if ! grep -q "CustomVersion" build-static.sh; then
+            echo "Using alternative approach to fix build script"
+            # Create a new version of the script
+            cat build-static.sh.original > build-static.sh.new
+            # Replace problematic go build command
+            sed -i '/go build.*CustomVersion/s/-X[[:space:]]*github\.com\/caddyserver\/caddy\/v2\.CustomVersion=\([^[:space:]]*\)/-X "github.com\/caddyserver\/caddy\/v2.CustomVersion=\1"/' build-static.sh.new
+            # Use the new script instead
+            mv build-static.sh.new build-static.sh
+            chmod +x build-static.sh
           fi
           
-      - name: Check build status
-        if: steps.build.outputs.build_success != 'true'
+      - name: Build FrankenPHP
         run: |
-          echo "Build failed to produce artifacts. Checking logs for issues."
-          exit 1
+          cd frankenphp
+          # If needed, build manually to avoid quoting issues
+          if [ ! -f "./build-static.sh" ] || [ ! -x "./build-static.sh" ]; then
+            echo "Building manually with fixed quoting"
+            mkdir -p dist
+            go build -o dist/frankenphp-linux-x86_64 -buildmode=pie -tags cgo,netgo,osusergo,static_build,nobadger,nomysql,nopgx -ldflags "-linkmode=external -extldflags '-static-pie -Wl,-z,stack-size=0x80000' -w -s -X \"github.com/caddyserver/caddy/v2.CustomVersion=FrankenPHP $(git rev-parse HEAD) PHP $(php -r 'echo PHP_VERSION;') Caddy\""
+          else
+            ./build-static.sh
+          fi
           
       - name: Upload build artifacts
-        if: steps.build.outputs.build_success == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: frankenphp-${{ steps.get_release.outputs.tag_name }}
