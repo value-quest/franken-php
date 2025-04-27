@@ -15,10 +15,32 @@ jobs:
           echo "Latest FrankenPHP release: $LATEST_VERSION"
           echo "tag_name=$LATEST_VERSION" >> $GITHUB_OUTPUT
       
-      - name: Clone and build FrankenPHP
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
+
+      - name: Clone FrankenPHP
         run: |
           echo "Building FrankenPHP release: ${{ steps.get_release.outputs.tag_name }}"
           git clone https://github.com/dunglas/frankenphp
+          
+      - name: Modify build script
+        run: |
+          cd frankenphp
+          # Create a backup of the original script
+          cp build-static.sh build-static.sh.bak
+          
+          # Fix the quoting in the script if needed
+          # This modifies the script to properly escape version strings
+          sed -i 's/-X \x27github.com\/caddyserver\/caddy\/v2.CustomVersion=FrankenPHP/-X "github.com\/caddyserver\/caddy\/v2.CustomVersion=FrankenPHP/g' build-static.sh
+          sed -i 's/ PHP [0-9.]\+ Caddy\x27/ PHP"/' build-static.sh
+          
+          # Make the script executable
+          chmod +x build-static.sh
+          
+      - name: Build FrankenPHP
+        run: |
           cd frankenphp
           ./build-static.sh
           
