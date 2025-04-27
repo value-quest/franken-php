@@ -1,5 +1,4 @@
 name: Build FrankenPHP Latest Release
-
 on:
   workflow_dispatch:  # Allows manual triggering
   
@@ -15,28 +14,33 @@ jobs:
           echo "Latest FrankenPHP release: $LATEST_VERSION"
           echo "tag_name=$LATEST_VERSION" >> $GITHUB_OUTPUT
       
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Build FrankenPHP using Docker
+      - name: Install build dependencies
         run: |
-          # Use Docker to build FrankenPHP
-          docker buildx bake --load static-builder-gnu
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
           
-          # Create a temporary directory for the output
-          mkdir -p frankenphp-build
+      - name: Clone FrankenPHP
+        run: |
+          echo "Building FrankenPHP release: ${{ steps.get_release.outputs.tag_name }}"
+          git clone https://github.com/dunglas/frankenphp
           
-          # Extract the binary from the Docker container
-          CONTAINER_ID=$(docker create --name static-builder-gnu dunglas/frankenphp:static-builder-gnu)
-          docker cp ${CONTAINER_ID}:/go/src/app/dist/frankenphp-linux-$(uname -m) frankenphp-build/
-          docker rm static-builder-gnu
+      - name: Fix build script
+        run: |
+          cd frankenphp
+          # Find the problematic line and fix it
+          sed -i '355s/CustomVersion=FrankenPHP ${FRANKENPHP_VERSION} PHP ${LIBPHP_VERSION} Caddy'"'"'\""/CustomVersion=FrankenPHP ${FRANKENPHP_VERSION} PHP ${LIBPHP_VERSION} Caddy'"'"'"/"/' build-static.sh
           
-          # List files to verify
-          ls -la frankenphp-build/
-      
+          # Verify the fix
+          tail -n 30 build-static.sh
+          
+      - name: Build FrankenPHP
+        run: |
+          cd frankenphp
+          ./build-static.sh
+          
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: frankenphp-${{ steps.get_release.outputs.tag_name }}
-          path: frankenphp-build/
+          path: frankenphp/dist/
           retention-days: 7
