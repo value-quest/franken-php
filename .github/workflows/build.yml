@@ -18,54 +18,64 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config
+          sudo apt-get install -y build-essential pkg-config golang php
 
       - name: Clone FrankenPHP
         run: |
           echo "Building FrankenPHP release: ${{ steps.get_release.outputs.tag_name }}"
           git clone https://github.com/dunglas/frankenphp
+          cd frankenphp
           
-      - name: Fix build script
+          # Print the script content to understand it better
+          echo "Contents of build-static.sh:"
+          cat build-static.sh
+          
+      - name: Create custom build script
         run: |
           cd frankenphp
           
-          # Create a backup of the original script
-          cp build-static.sh build-static.sh.original
+          # Create a custom build script that handles the version string properly
+          cat > custom-build.sh << 'EOF'
+          #!/bin/bash
+          set -e
           
-          # Examine the script
-          echo "Examining build script content:"
-          grep -i "CustomVersion" build-static.sh || echo "CustomVersion not found in script"
+          # Create dist directory
+          mkdir -p dist
           
-          # Modify the script to fix the quoting issue
-          sed -i 's/-X github.com\/caddyserver\/caddy\/v2.CustomVersion=/-X "github.com\/caddyserver\/caddy\/v2.CustomVersion=/' build-static.sh
-          sed -i 's/ Caddy/ Caddy"/' build-static.sh
+          # Get Git commit hash
+          GIT_COMMIT=$(git rev-parse HEAD)
           
-          # Check the modified script
-          echo "Modified script content:"
-          grep -i "CustomVersion" build-static.sh || echo "CustomVersion not found in modified script"
+          # Get PHP version without deprecation notices
+          PHP_VERSION=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION.".".PHP_RELEASE_VERSION;' 2>/dev/null)
           
-          # Alternatively, use a more targeted approach if the sed command doesn't work
-          if ! grep -q "CustomVersion" build-static.sh; then
-            echo "Using alternative approach to fix build script"
-            # Create a new version of the script
-            cat build-static.sh.original > build-static.sh.new
-            # Replace problematic go build command
-            sed -i '/go build.*CustomVersion/s/-X[[:space:]]*github\.com\/caddyserver\/caddy\/v2\.CustomVersion=\([^[:space:]]*\)/-X "github.com\/caddyserver\/caddy\/v2.CustomVersion=\1"/' build-static.sh.new
-            # Use the new script instead
-            mv build-static.sh.new build-static.sh
-            chmod +x build-static.sh
-          fi
+          echo "Building FrankenPHP with:"
+          echo "Git commit: $GIT_COMMIT"
+          echo "PHP version: $PHP_VERSION"
           
-      - name: Build FrankenPHP
+          # Build with properly escaped version string
+          go build \
+            -o dist/frankenphp-linux-x86_64 \
+            -buildmode=pie \
+            -tags cgo,netgo,osusergo,static_build,nobadger,nomysql,nopgx \
+            -ldflags "-linkmode=external -extldflags '-static-pie -Wl,-z,stack-size=0x80000' -w -s -X \"github.com/caddyserver/caddy/v2.CustomVersion=FrankenPHP ${GIT_COMMIT} PHP ${PHP_VERSION} Caddy\""
+          
+          echo "Build completed. Binary at dist/frankenphp-linux-x86_64"
+          EOF
+          
+          chmod +x custom-build.sh
+          
+      - name: Build FrankenPHP with custom script
         run: |
           cd frankenphp
-          # If needed, build manually to avoid quoting issues
-          if [ ! -f "./build-static.sh" ] || [ ! -x "./build-static.sh" ]; then
-            echo "Building manually with fixed quoting"
-            mkdir -p dist
-            go build -o dist/frankenphp-linux-x86_64 -buildmode=pie -tags cgo,netgo,osusergo,static_build,nobadger,nomysql,nopgx -ldflags "-linkmode=external -extldflags '-static-pie -Wl,-z,stack-size=0x80000' -w -s -X \"github.com/caddyserver/caddy/v2.CustomVersion=FrankenPHP $(git rev-parse HEAD) PHP $(php -r 'echo PHP_VERSION;') Caddy\""
+          ./custom-build.sh
+          
+          # Verify the binary was created
+          if [ -f "dist/frankenphp-linux-x86_64" ]; then
+            echo "Build successful, binary created"
+            ls -la dist/
           else
-            ./build-static.sh
+            echo "Build failed, no binary created"
+            exit 1
           fi
           
       - name: Upload build artifacts
