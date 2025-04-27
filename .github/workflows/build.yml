@@ -25,26 +25,30 @@ jobs:
           echo "Building FrankenPHP release: ${{ steps.get_release.outputs.tag_name }}"
           git clone https://github.com/dunglas/frankenphp
           
-      - name: Modify build script
-        run: |
-          cd frankenphp
-          # Create a backup of the original script
-          cp build-static.sh build-static.sh.bak
-          
-          # Fix the quoting in the script if needed
-          # This modifies the script to properly escape version strings
-          sed -i 's/-X \x27github.com\/caddyserver\/caddy\/v2.CustomVersion=FrankenPHP/-X "github.com\/caddyserver\/caddy\/v2.CustomVersion=FrankenPHP/g' build-static.sh
-          sed -i 's/ PHP [0-9.]\+ Caddy\x27/ PHP"/' build-static.sh
-          
-          # Make the script executable
-          chmod +x build-static.sh
-          
       - name: Build FrankenPHP
+        id: build
+        continue-on-error: true
         run: |
           cd frankenphp
+          # Set IGNORE_DEPRECATION_WARNINGS to suppress PHP deprecation notices
+          export IGNORE_DEPRECATION_WARNINGS=1
           ./build-static.sh
           
+          # Check if build artifacts exist
+          if [ -d "dist" ] && [ "$(ls -A dist)" ]; then
+            echo "build_success=true" >> $GITHUB_OUTPUT
+          else
+            echo "build_success=false" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Check build status
+        if: steps.build.outputs.build_success != 'true'
+        run: |
+          echo "Build failed to produce artifacts. Checking logs for issues."
+          exit 1
+          
       - name: Upload build artifacts
+        if: steps.build.outputs.build_success == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: frankenphp-${{ steps.get_release.outputs.tag_name }}
