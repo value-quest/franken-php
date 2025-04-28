@@ -58,7 +58,7 @@ jobs:
           ./frankenphp version
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: frankenphp-php8.3
           path: frankenphp-1.1.2/caddy/frankenphp/frankenphp
