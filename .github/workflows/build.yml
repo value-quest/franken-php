@@ -29,7 +29,6 @@ jobs:
         run: |
           curl -L https://www.php.net/distributions/php-8.3.5.tar.gz -o php.tar.gz
           tar xf php.tar.gz
-          cd php-8.3.5/
 
       - name: Configure and Build PHP
         run: |
@@ -41,25 +40,39 @@ jobs:
             --enable-zend-max-execution-timers
           make -j$(nproc)
           sudo make install
+          sudo ldconfig
 
       - name: Get FrankenPHP
         run: |
           curl -L https://github.com/dunglas/frankenphp/archive/refs/tags/v1.1.2.tar.gz | tar xz
-          cd frankenphp-1.1.2/
 
       - name: Build FrankenPHP
         run: |
           cd frankenphp-1.1.2/caddy/frankenphp
           CGO_CFLAGS=$(php-config --includes) CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs)" go build -tags=nobadger,nomysql,nopgx
 
-      - name: Test the binary
+      - name: Copy PHP library dependencies
         run: |
-          cd frankenphp-1.1.2/caddy/frankenphp
-          ./frankenphp version
+          # Find libphp.so and copy to a directory we'll package
+          mkdir -p dist/lib
+          cp $(php-config --prefix)/lib/libphp.so dist/lib/
+          # Copy all other dependencies
+          ldd frankenphp-1.1.2/caddy/frankenphp/frankenphp | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/
+          # Copy the binary
+          cp frankenphp-1.1.2/caddy/frankenphp/frankenphp dist/
+
+      - name: Create wrapper script
+        run: |
+          cat > dist/run-frankenphp.sh << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH" "$SCRIPT_DIR/frankenphp" "$@"
+          EOF
+          chmod +x dist/run-frankenphp.sh
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: frankenphp-php8.3
-          path: frankenphp-1.1.2/caddy/frankenphp/frankenphp
+          path: dist
           retention-days: 7
