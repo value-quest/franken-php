@@ -14,31 +14,42 @@ jobs:
           echo "Latest FrankenPHP release: $LATEST_VERSION"
           echo "tag_name=$LATEST_VERSION" >> $GITHUB_OUTPUT
       
+      - name: Clone FrankenPHP repository
+        run: |
+          echo "Cloning FrankenPHP repository for release: ${{ steps.get_release.outputs.tag_name }}"
+          git clone https://github.com/dunglas/frankenphp.git
+          cd frankenphp
+          if [[ "${{ steps.get_release.outputs.tag_name }}" == v* ]]; then
+            git checkout "${{ steps.get_release.outputs.tag_name }}"
+          else
+            git checkout "v${{ steps.get_release.outputs.tag_name }}"
+          fi
+      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       
       - name: Build FrankenPHP using Docker
         run: |
-          echo "Building FrankenPHP release: ${{ steps.get_release.outputs.tag_name }}"
+          cd frankenphp
           
           # Build the static builder image
-          docker buildx bake --load static-builder-gnu --file https://raw.githubusercontent.com/dunglas/frankenphp/main/docker-bake.hcl
+          docker buildx bake --load static-builder-gnu
           
           # Create a container from the image
           CONTAINER_ID=$(docker create --name static-builder-gnu dunglas/frankenphp:static-builder-gnu)
           
           # Copy the binary from the container
-          mkdir -p dist
-          docker cp ${CONTAINER_ID}:/go/src/app/dist/frankenphp-linux-$(uname -m) dist/frankenphp
+          mkdir -p ../dist
+          docker cp ${CONTAINER_ID}:/go/src/app/dist/frankenphp-linux-$(uname -m) ../dist/frankenphp
           
           # Remove the container
           docker rm ${CONTAINER_ID}
           
           # Make the binary executable
-          chmod +x dist/frankenphp
+          chmod +x ../dist/frankenphp
           
           # Display version info
-          dist/frankenphp version
+          ../dist/frankenphp version
       
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
