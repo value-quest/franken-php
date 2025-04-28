@@ -1,78 +1,126 @@
-name: Build FrankenPHP with PHP 8.3
+name: Build FrankenPHP binaries
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_dispatch:
     # Allow manual triggering
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly builds on Sunday at midnight
 
 jobs:
   build:
+    strategy:
+      matrix:
+        php-version: ['8.3.20', '8.4.6']  # Latest 8.3 stable and 8.4 stable
+        include:
+          - php-version: '8.3.20'
+            php-short: 'php83'
+          - php-version: '8.4.6'
+            php-short: 'php84'
+            
     runs-on: ubuntu-latest
+    env:
+      FRANKENPHP_VERSION: '1.5.0'
+    
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential curl ca-certificates \
             pkg-config libssl-dev zlib1g-dev libxml2-dev libbrotli-dev \
-            autoconf automake libtool libsqlite3-dev libcurl4-openssl-dev libonig-dev
+            autoconf automake libtool libsqlite3-dev libcurl4-openssl-dev libonig-dev \
+            libmariadb-dev libmariadb-dev-compat
 
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.21'
-          cache: true
+          go-version: '1.24'
+          # Disable cache since we don't have a go.sum file in the root
+          cache: false
 
-      - name: Get PHP 8.3
+      - name: Get PHP ${{ matrix.php-version }}
         run: |
-          curl -L https://www.php.net/distributions/php-8.3.5.tar.gz -o php.tar.gz
+          curl -L https://www.php.net/distributions/php-${{ matrix.php-version }}.tar.gz -o php.tar.gz
           tar xf php.tar.gz
 
       - name: Configure and Build PHP
         run: |
-          cd php-8.3.5/
+          cd php-${{ matrix.php-version }}/
           ./configure \
             --enable-embed \
             --enable-zts \
             --disable-zend-signals \
-            --enable-zend-max-execution-timers
+            --enable-zend-max-execution-timers \
+            --enable-mbstring \
+            --with-openssl \
+            --enable-xml \
+            --enable-ctype \
+            --with-curl \
+            --enable-dom \
+            --enable-fileinfo \
+            --enable-filter \
+            --enable-hash \
+            --enable-pdo \
+            --with-pdo-sqlite \
+            --with-pdo-mysql \
+            --with-mysqli \
+            --enable-session \
+            --enable-tokenizer
           make -j$(nproc)
           sudo make install
           sudo ldconfig
 
       - name: Get FrankenPHP
         run: |
-          curl -L https://github.com/dunglas/frankenphp/archive/refs/tags/v1.1.2.tar.gz | tar xz
+          curl -L https://github.com/dunglas/frankenphp/archive/refs/tags/v${FRANKENPHP_VERSION}.tar.gz | tar xz
 
       - name: Build FrankenPHP
+        working-directory: frankenphp-${{ env.FRANKENPHP_VERSION }}/caddy/frankenphp
         run: |
-          cd frankenphp-1.1.2/caddy/frankenphp
           CGO_CFLAGS=$(php-config --includes) CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs)" go build -tags=nobadger,nomysql,nopgx
 
-      - name: Copy PHP library dependencies
+      - name: Package FrankenPHP with libraries
         run: |
-          # Find libphp.so and copy to a directory we'll package
           mkdir -p dist/lib
           cp $(php-config --prefix)/lib/libphp.so dist/lib/
-          # Copy all other dependencies
-          ldd frankenphp-1.1.2/caddy/frankenphp/frankenphp | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/
-          # Copy the binary
-          cp frankenphp-1.1.2/caddy/frankenphp/frankenphp dist/
-
-      - name: Create wrapper script
-        run: |
-          cat > dist/run-frankenphp.sh << 'EOF'
+          ldd frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
+          cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/
+          # Create a simple launcher script that sets LD_LIBRARY_PATH
+          cat > dist/frankenphp << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-          LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH" "$SCRIPT_DIR/frankenphp" "$@"
+          LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH" "$SCRIPT_DIR/frankenphp.bin" "$@"
           EOF
-          chmod +x dist/run-frankenphp.sh
+          # Move the actual binary
+          mv dist/frankenphp dist/frankenphp.bin
+          chmod +x dist/frankenphp
+          # Create archive
+          cd dist
+          tar -czf ../frankenphp-linux-amd64-${{ matrix.php-short }}.tar.gz .
+          cd ..
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: frankenphp-php8.3
-          path: dist
+          name: frankenphp-${{ matrix.php-short }}
+          path: frankenphp-linux-amd64-${{ matrix.php-short }}.tar.gz
           retention-days: 7
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+        with:
+          tag_name: v${{ env.FRANKENPHP_VERSION }}-${{ matrix.php-short }}-${{ github.run_number }}
+          name: FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ matrix.php-version }}
+          draft: false
+          prerelease: false
+          files: frankenphp-linux-amd64-${{ matrix.php-short }}.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
