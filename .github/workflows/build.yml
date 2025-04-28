@@ -22,12 +22,24 @@ jobs:
             php-short: 'php84'
     
     runs-on: ubuntu-latest
-    env:
-      FRANKENPHP_VERSION: '1.5.0'
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Get latest FrankenPHP version
+        id: frankenphp_version
+        run: |
+          # Install jq if not already installed
+          sudo apt-get update
+          sudo apt-get install -y jq
+          
+          # Use GitHub API to get the latest release
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/dunglas/frankenphp/releases/latest | jq -r '.tag_name')
+          # Remove the 'v' prefix if present
+          FRANKENPHP_VERSION=${LATEST_RELEASE#v}
+          echo "FRANKENPHP_VERSION=$FRANKENPHP_VERSION" >> $GITHUB_ENV
+          echo "Latest FrankenPHP version: $FRANKENPHP_VERSION"
 
       - name: Install dependencies
         run: |
@@ -123,7 +135,7 @@ jobs:
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
-        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         with:
           tag_name: v${{ env.FRANKENPHP_VERSION }}-${{ matrix.php-short }}-${{ github.run_number }}
           name: FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ matrix.php-version }}
