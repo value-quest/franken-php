@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
-    # Allow manual triggering
+  # Allow manual triggering
   schedule:
     - cron: '0 0 * * 0'  # Weekly builds on Sunday at midnight
 
@@ -18,7 +18,7 @@ jobs:
         include:
           - php-version: '8.3.20'
             php-short: 'php83'
-            
+    
     runs-on: ubuntu-latest
     env:
       FRANKENPHP_VERSION: '1.5.0'
@@ -26,7 +26,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        
+
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -85,21 +85,27 @@ jobs:
 
       - name: Package FrankenPHP with libraries
         run: |
+          # Create directories
           mkdir -p dist/lib
+      
+          # Copy PHP shared library
           cp $(php-config --prefix)/lib/libphp.so dist/lib/
+      
+          # Copy all required shared libraries
           ldd frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
-          cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/
-          # Create a simple launcher script that sets LD_LIBRARY_PATH
+      
+          # Copy the FrankenPHP binary directly as frankenphp.bin
+          cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/frankenphp.bin
+          chmod +x dist/frankenphp.bin
+      
+          # Create wrapper script directly
           cat > dist/frankenphp << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
           LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH" "$SCRIPT_DIR/frankenphp.bin" "$@"
           EOF
-          # Move the actual binary
-          mv dist/frankenphp dist/frankenphp.bin || true
-          # Verify file exists before chmod
-          [ -f dist/frankenphp.bin ] && chmod +x dist/frankenphp.bin
           chmod +x dist/frankenphp
+      
           # Create archive
           cd dist
           tar -czf ../frankenphp-linux-amd64-${{ matrix.php-short }}.tar.gz .
