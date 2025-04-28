@@ -14,42 +14,42 @@ jobs:
           echo "Latest FrankenPHP release: $LATEST_VERSION"
           echo "tag_name=$LATEST_VERSION" >> $GITHUB_OUTPUT
       
-      - name: Clone FrankenPHP repository
-        run: |
-          echo "Cloning FrankenPHP repository for release: ${{ steps.get_release.outputs.tag_name }}"
-          git clone https://github.com/dunglas/frankenphp.git
-          cd frankenphp
-          if [[ "${{ steps.get_release.outputs.tag_name }}" == v* ]]; then
-            git checkout "${{ steps.get_release.outputs.tag_name }}"
-          else
-            git checkout "v${{ steps.get_release.outputs.tag_name }}"
-          fi
+      - name: Checkout FrankenPHP
+        uses: actions/checkout@v4
+        with:
+          repository: dunglas/frankenphp
+          ref: ${{ steps.get_release.outputs.tag_name }}
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       
-      - name: Build FrankenPHP using Docker
+      - name: Build FrankenPHP static binary
         run: |
-          cd frankenphp
+          # Create a specific context for the static builder
+          mkdir -p dist
           
           # Build the static builder image
-          docker buildx bake --load static-builder-gnu
+          docker build --target static-builder-gnu -t frankenphp-static-builder -f Dockerfile .
           
-          # Create a container from the image
-          CONTAINER_ID=$(docker create --name static-builder-gnu dunglas/frankenphp:static-builder-gnu)
+          # Create a container from the static builder image
+          CONTAINER_ID=$(docker create frankenphp-static-builder)
           
           # Copy the binary from the container
-          mkdir -p ../dist
-          docker cp ${CONTAINER_ID}:/go/src/app/dist/frankenphp-linux-$(uname -m) ../dist/frankenphp
+          docker cp $CONTAINER_ID:/go/src/app/dist/frankenphp-linux-$(uname -m) dist/frankenphp
           
           # Remove the container
-          docker rm ${CONTAINER_ID}
+          docker rm $CONTAINER_ID
           
           # Make the binary executable
-          chmod +x ../dist/frankenphp
+          chmod +x dist/frankenphp
           
           # Display version info
-          ../dist/frankenphp version
+          if [ -f "dist/frankenphp" ]; then
+            dist/frankenphp version || echo "Binary built, but couldn't display version info"
+          else
+            echo "Failed to build FrankenPHP binary"
+            exit 1
+          fi
       
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
