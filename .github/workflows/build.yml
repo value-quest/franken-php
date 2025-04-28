@@ -14,10 +14,12 @@ jobs:
   build:
     strategy:
       matrix:
-        php-version: ['8.3.20']  # Latest 8.3 stable and 8.4 stable
+        php-version: ['8.3.20', '8.4.6']  # Latest 8.3 stable and 8.4 stable
         include:
           - php-version: '8.3.20'
             php-short: 'php83'
+          - php-version: '8.4.6'
+            php-short: 'php84'
     
     runs-on: ubuntu-latest
     env:
