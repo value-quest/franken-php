@@ -1,86 +1,65 @@
-name: Build FrankenPHP Latest Release
+name: Build FrankenPHP with PHP 8.3
+
 on:
-  workflow_dispatch:  # Allows manual triggering
-  
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    # Allow manual triggering
+
 jobs:
-  build-latest:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Get latest release info
-        id: get_release
+      - name: Install dependencies
         run: |
-          LATEST_RELEASE=$(curl -s https://api.github.com/repos/dunglas/frankenphp/releases/latest)
-          LATEST_VERSION=$(echo $LATEST_RELEASE | jq -r .tag_name)
-          echo "Latest FrankenPHP release: $LATEST_VERSION"
-          echo "tag_name=$LATEST_VERSION" >> $GITHUB_OUTPUT
-      
-      - name: Checkout FrankenPHP
-        uses: actions/checkout@v4
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl ca-certificates \
+            pkg-config libssl-dev zlib1g-dev libxml2-dev libbrotli-dev \
+            autoconf automake libtool libsqlite3-dev libcurl4-openssl-dev libonig-dev
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
         with:
-          repository: dunglas/frankenphp
-          ref: ${{ steps.get_release.outputs.tag_name }}
-      
-      - name: Create custom Dockerfile for static build
+          go-version: '1.21'
+          cache: true
+
+      - name: Get PHP 8.3
         run: |
-          cat > Dockerfile.static << 'EOF'
-FROM golang:1.22-bookworm
+          curl -L https://www.php.net/distributions/php-8.3.5.tar.gz -o php.tar.gz
+          tar xf php.tar.gz
+          cd php-8.3.5/
 
-WORKDIR /go/src/app
-
-# Install build dependencies
-RUN apt-get update && \
-    apt-get install -y \
-    build-essential \
-    cmake \
-    pkg-config \
-    git \
-    curl \
-    composer \
-    upx
-
-# Copy FrankenPHP source code
-COPY . .
-
-# Set environment variables for GNU libc build
-ENV SPC_LIBC=glibc
-
-# Build the static binary
-RUN ./build-static.sh
-
-CMD ["bash"]
-EOF
-      
-      - name: Build FrankenPHP static binary
+      - name: Configure and Build PHP
         run: |
-          # Create output directory
-          mkdir -p dist
-          
-          # Build the custom Docker image
-          docker build -t frankenphp-static-builder -f Dockerfile.static .
-          
-          # Create a container from the image
-          CONTAINER_ID=$(docker create frankenphp-static-builder)
-          
-          # Copy the binary from the container
-          docker cp $CONTAINER_ID:/go/src/app/dist/frankenphp-linux-$(uname -m) dist/frankenphp
-          
-          # Remove the container
-          docker rm $CONTAINER_ID
-          
-          # Make the binary executable
-          chmod +x dist/frankenphp
-          
-          # Display version info
-          if [ -f "dist/frankenphp" ]; then
-            dist/frankenphp version || echo "Binary built, but couldn't display version info"
-          else
-            echo "Failed to build FrankenPHP binary"
-            exit 1
-          fi
-      
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+          cd php-8.3.5/
+          ./configure \
+            --enable-embed \
+            --enable-zts \
+            --disable-zend-signals \
+            --enable-zend-max-execution-timers
+          make -j$(nproc)
+          sudo make install
+
+      - name: Get FrankenPHP
+        run: |
+          curl -L https://github.com/dunglas/frankenphp/archive/refs/tags/v1.1.2.tar.gz | tar xz
+          cd frankenphp-1.1.2/
+
+      - name: Build FrankenPHP
+        run: |
+          cd frankenphp-1.1.2/caddy/frankenphp
+          CGO_CFLAGS=$(php-config --includes) CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs)" go build -tags=nobadger,nomysql,nopgx
+
+      - name: Test the binary
+        run: |
+          cd frankenphp-1.1.2/caddy/frankenphp
+          ./frankenphp version
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v3
         with:
-          name: frankenphp-${{ steps.get_release.outputs.tag_name }}
-          path: dist/frankenphp
+          name: frankenphp-php8.3
+          path: frankenphp-1.1.2/caddy/frankenphp/frankenphp
           retention-days: 7
