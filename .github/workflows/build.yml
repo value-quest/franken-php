@@ -96,7 +96,9 @@ jobs:
           LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH" "$SCRIPT_DIR/frankenphp.bin" "$@"
           EOF
           # Move the actual binary
-          mv dist/frankenphp dist/frankenphp.bin
+          mv dist/frankenphp dist/frankenphp.bin || true
+          # Verify file exists before chmod
+          [ -f dist/frankenphp.bin ] && chmod +x dist/frankenphp.bin
           chmod +x dist/frankenphp
           # Create archive
           cd dist
