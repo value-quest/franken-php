@@ -100,7 +100,8 @@ jobs:
         working-directory: frankenphp-${{ env.FRANKENPHP_VERSION }}/caddy/frankenphp
         run: |
           # Using the exact approach recommended in the FrankenPHP documentation
-          CGO_CFLAGS=$(php-config --includes) CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs)" go build -tags=nobadger,nomysql,nopgx
+          # Adding nowatcher tag to disable the watcher dependency
+          CGO_CFLAGS=$(php-config --includes) CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs)" go build -tags=nobadger,nomysql,nopgx,nowatcher
 
       - name: Test binary
         run: |
