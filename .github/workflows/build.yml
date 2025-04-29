@@ -1,4 +1,4 @@
-name: Build FrankenPHP binaries
+name: Build FrankenPHP with PHP 8.3 and 8.4
 
 on:
   push:
@@ -6,13 +6,9 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
-  # Allow manual triggering
+    # Allow manual triggering
   schedule:
     - cron: '0 0 * * 0'  # Weekly builds on Sunday at midnight
-
-# Add explicit permissions for creating GitHub releases
-permissions:
-  contents: write
 
 jobs:
   build:
@@ -24,27 +20,15 @@ jobs:
             php-short: 'php83'
           - php-version: '8.4.6'
             php-short: 'php84'
-    
+            
     runs-on: ubuntu-latest
+    env:
+      FRANKENPHP_VERSION: '1.5.0'
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Get latest FrankenPHP version
-        id: frankenphp_version
-        run: |
-          # Install jq if not already installed
-          sudo apt-get update
-          sudo apt-get install -y jq
-          
-          # Use GitHub API to get the latest release
-          LATEST_RELEASE=$(curl -s https://api.github.com/repos/dunglas/frankenphp/releases/latest | jq -r '.tag_name')
-          # Remove the 'v' prefix if present
-          FRANKENPHP_VERSION=${LATEST_RELEASE#v}
-          echo "FRANKENPHP_VERSION=$FRANKENPHP_VERSION" >> $GITHUB_ENV
-          echo "Latest FrankenPHP version: $FRANKENPHP_VERSION"
-
+        
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -57,6 +41,7 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: '1.24'
+          # Disable cache since we don't have a go.sum file in the root
           cache: false
 
       - name: Get PHP ${{ matrix.php-version }}
@@ -67,7 +52,6 @@ jobs:
       - name: Configure and Build PHP
         run: |
           cd php-${{ matrix.php-version }}/
-          # Using the exact flags recommended for Linux in the FrankenPHP documentation
           ./configure \
             --enable-embed \
             --enable-zts \
@@ -96,30 +80,53 @@ jobs:
         run: |
           curl -L https://github.com/dunglas/frankenphp/archive/refs/tags/v${FRANKENPHP_VERSION}.tar.gz | tar xz
 
-      - name: Build FrankenPHP
+      - name: Build FrankenPHP with rpath
         working-directory: frankenphp-${{ env.FRANKENPHP_VERSION }}/caddy/frankenphp
         run: |
-          # Using the exact approach recommended in the FrankenPHP documentation
-          # Adding nowatcher tag to disable the watcher dependency
-          CGO_CFLAGS=$(php-config --includes) CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs)" go build -tags=nobadger,nomysql,nopgx,nowatcher
+          # Build with rpath set to $ORIGIN/lib
+          CGO_CFLAGS=$(php-config --includes) \
+          CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs) -Wl,-rpath,\$ORIGIN/../lib" \
+          go build -tags=nobadger,nomysql,nopgx,nowatcher
 
-      - name: Test binary
+      - name: Package FrankenPHP with libraries
         run: |
-          echo "Checking binary details..."
-          frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp version
-
-      - name: Package FrankenPHP Binary
-        run: |
-          # Create directory
-          mkdir -p dist
+          # Create directories
+          mkdir -p dist/lib
+          
+          # Debug: Check if libphp.so exists and its location
+          find /usr -name "libphp.so" || echo "libphp.so not found in /usr"
+          php-config --prefix || echo "php-config --prefix failed"
+          
+          # Copy PHP shared library (with error checking)
+          PHP_LIB_PATH="$(php-config --prefix)/lib/libphp.so"
+          if [ -f "$PHP_LIB_PATH" ]; then
+            cp "$PHP_LIB_PATH" dist/lib/
+            echo "Copied libphp.so from $PHP_LIB_PATH"
+          else
+            echo "ERROR: Cannot find libphp.so at $PHP_LIB_PATH"
+            find /usr/local -name "libphp.so"
+            exit 1
+          fi
+          
+          # Verify the binary exists before attempting to copy dependencies
+          if [ ! -f "frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp" ]; then
+            echo "ERROR: FrankenPHP binary not found!"
+            find frankenphp-${FRANKENPHP_VERSION} -name "frankenphp"
+            exit 1
+          fi
+          
+          # Copy all required shared libraries
+          echo "Copying shared library dependencies..."
+          ldd frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
           
           # Copy the FrankenPHP binary
-          cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/
+          echo "Copying FrankenPHP binary..."
+          cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/frankenphp
           chmod +x dist/frankenphp
           
-          # Create archive with just the binary
+          # Create archive
           cd dist
-          tar -czf ../frankenphp-linux-amd64-${{ matrix.php-short }}.tar.gz frankenphp
+          tar -czf ../frankenphp-linux-amd64-${{ matrix.php-short }}.tar.gz .
           cd ..
 
       - name: Upload binary artifact
@@ -132,7 +139,7 @@ jobs:
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
-        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
         with:
           tag_name: v${{ env.FRANKENPHP_VERSION }}-${{ matrix.php-short }}-${{ github.run_number }}
           name: FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ matrix.php-version }}
