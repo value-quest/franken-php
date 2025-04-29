@@ -9,9 +9,6 @@ on:
   # Allow manual triggering
   schedule:
     - cron: '0 0 * * 0'  # Weekly builds on Sunday at midnight
-    
-permissions:
-  contents: write
 
 jobs:
   build:
@@ -98,34 +95,33 @@ jobs:
       - name: Build FrankenPHP
         working-directory: frankenphp-${{ env.FRANKENPHP_VERSION }}/caddy/frankenphp
         run: |
-          CGO_CFLAGS=$(php-config --includes) CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs)" go build -tags=nobadger,nomysql,nopgx,nowatcher
+          # Build with CGO enabled but with as many static linkages as possible
+          # PHP will be dynamically linked since it will be installed on the target system
+          CGO_ENABLED=1 CGO_CFLAGS=$(php-config --includes) CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs)" \
+          go build -tags=nobadger,nomysql,nopgx,nowatcher \
+          -ldflags="-extldflags=-static" .
 
-      - name: Package FrankenPHP with libraries
+      - name: Verify Binary Dependencies
         run: |
-          # Create directories
-          mkdir -p dist/lib
-      
-          # Copy PHP shared library
-          cp $(php-config --prefix)/lib/libphp.so dist/lib/
-      
-          # Copy all required shared libraries
-          ldd frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
-      
-          # Copy the FrankenPHP binary directly as frankenphp.bin
-          cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/frankenphp.bin
-          chmod +x dist/frankenphp.bin
-      
-          # Create wrapper script directly
-          cat > dist/frankenphp << 'EOF'
-          #!/bin/bash
-          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-          LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH" "$SCRIPT_DIR/frankenphp.bin" "$@"
-          EOF
+          echo "Checking binary dependencies..."
+          ldd frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp || echo "No dependencies found or ldd failed (static binary)"
+          
+          # Test if the binary works with the system PHP
+          echo "Testing binary with system PHP..."
+          frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp version
+
+      - name: Package FrankenPHP Binary
+        run: |
+          # Create directory for the release
+          mkdir -p dist
+          
+          # Copy the FrankenPHP binary
+          cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/frankenphp
           chmod +x dist/frankenphp
-      
-          # Create archive
+          
+          # Create archive with just the binary
           cd dist
-          tar -czf ../frankenphp-linux-amd64-${{ matrix.php-short }}.tar.gz .
+          tar -czf ../frankenphp-linux-amd64-${{ matrix.php-short }}.tar.gz frankenphp
           cd ..
 
       - name: Upload binary artifact
