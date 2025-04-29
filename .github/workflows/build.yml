@@ -9,6 +9,9 @@ on:
   # Allow manual triggering
   schedule:
     - cron: '0 0 * * 0'  # Weekly builds on Sunday at midnight
+    
+permissions:
+  contents: write
 
 jobs:
   build:
