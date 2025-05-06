@@ -11,23 +11,16 @@ on:
     - cron: '0 0 * * 0'  # Weekly builds on Sunday at midnight
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        php-version: ['8.3.20', '8.4.6']  # Latest 8.3 stable and 8.4 stable
-        include:
-          - php-version: '8.3.20'
-            php-short: 'php83'
-          - php-version: '8.4.6'
-            php-short: 'php84'
-            
+  # Build job for PHP 8.3
+  build-php83:
     runs-on: ubuntu-latest
-    # Add explicit permissions for creating releases
     permissions:
       contents: write
       
     env:
       FRANKENPHP_VERSION: '1.5.0'
+      PHP_VERSION: '8.3.20'
+      PHP_SHORT: 'php83'
     
     steps:
       - name: Checkout repository
@@ -48,14 +41,14 @@ jobs:
           # Disable cache since we don't have a go.sum file in the root
           cache: false
 
-      - name: Get PHP ${{ matrix.php-version }}
+      - name: Get PHP ${{ env.PHP_VERSION }}
         run: |
-          curl -L https://www.php.net/distributions/php-${{ matrix.php-version }}.tar.gz -o php.tar.gz
+          curl -L https://www.php.net/distributions/php-${{ env.PHP_VERSION }}.tar.gz -o php.tar.gz
           tar xf php.tar.gz
 
       - name: Configure and Build PHP
         run: |
-          cd php-${{ matrix.php-version }}/
+          cd php-${{ env.PHP_VERSION }}/
           ./configure \
             --enable-embed \
             --enable-zts \
@@ -130,27 +123,162 @@ jobs:
           
           # Create archive
           cd dist
-          tar -czf ../frankenphp-linux-amd64-${{ matrix.php-short }}.tar.gz .
+          tar -czf ../frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz .
           cd ..
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: frankenphp-${{ matrix.php-short }}
-          path: frankenphp-linux-amd64-${{ matrix.php-short }}.tar.gz
+          name: frankenphp-${{ env.PHP_SHORT }}
+          path: frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz
           retention-days: 7
 
-      # Create GitHub Release - ensure unique releases per PHP version
-      - name: Create GitHub Release
+      # Create release for PHP 8.3
+      - name: Create Release for PHP 8.3
         uses: softprops/action-gh-release@v1
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
         with:
-          files: frankenphp-linux-amd64-${{ matrix.php-short }}.tar.gz
-          tag_name: v${{ env.FRANKENPHP_VERSION }}-${{ matrix.php-short }}-${{ github.run_number }}
-          name: FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ matrix.php-version }}
+          files: frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz
+          tag_name: v${{ env.FRANKENPHP_VERSION }}-${{ env.PHP_SHORT }}-${{ github.run_number }}
+          name: FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}
           draft: false
           prerelease: false
           generate_release_notes: true
-          make_latest: false  # Ensure each release is independent
-          fail_on_unmatched_files: false  # Don't fail if some files aren't found
+        env:
+          GITHUB_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
+
+  # Build job for PHP 8.4
+  build-php84:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
+    env:
+      FRANKENPHP_VERSION: '1.5.0'
+      PHP_VERSION: '8.4.6'
+      PHP_SHORT: 'php84'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl ca-certificates \
+            pkg-config libssl-dev zlib1g-dev libxml2-dev libbrotli-dev \
+            autoconf automake libtool libsqlite3-dev libcurl4-openssl-dev libonig-dev \
+            libmariadb-dev libmariadb-dev-compat
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24'
+          # Disable cache since we don't have a go.sum file in the root
+          cache: false
+
+      - name: Get PHP ${{ env.PHP_VERSION }}
+        run: |
+          curl -L https://www.php.net/distributions/php-${{ env.PHP_VERSION }}.tar.gz -o php.tar.gz
+          tar xf php.tar.gz
+
+      - name: Configure and Build PHP
+        run: |
+          cd php-${{ env.PHP_VERSION }}/
+          ./configure \
+            --enable-embed \
+            --enable-zts \
+            --disable-zend-signals \
+            --enable-zend-max-execution-timers \
+            --enable-mbstring \
+            --with-openssl \
+            --enable-xml \
+            --enable-ctype \
+            --with-curl \
+            --enable-dom \
+            --enable-fileinfo \
+            --enable-filter \
+            --enable-hash \
+            --enable-pdo \
+            --with-pdo-sqlite \
+            --with-pdo-mysql \
+            --with-mysqli \
+            --enable-session \
+            --enable-tokenizer
+          make -j$(nproc)
+          sudo make install
+          sudo ldconfig
+
+      - name: Get FrankenPHP
+        run: |
+          curl -L https://github.com/dunglas/frankenphp/archive/refs/tags/v${FRANKENPHP_VERSION}.tar.gz | tar xz
+
+      - name: Build FrankenPHP with rpath
+        working-directory: frankenphp-${{ env.FRANKENPHP_VERSION }}/caddy/frankenphp
+        run: |
+          # Build with rpath set to $ORIGIN/lib
+          CGO_CFLAGS=$(php-config --includes) \
+          CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs) -Wl,-rpath,\$ORIGIN/../lib" \
+          go build -tags=nobadger,nomysql,nopgx,nowatcher
+
+      - name: Package FrankenPHP with libraries
+        run: |
+          # Create directories
+          mkdir -p dist/lib
+          
+          # Debug: Check if libphp.so exists and its location
+          find /usr -name "libphp.so" || echo "libphp.so not found in /usr"
+          php-config --prefix || echo "php-config --prefix failed"
+          
+          # Copy PHP shared library (with error checking)
+          PHP_LIB_PATH="$(php-config --prefix)/lib/libphp.so"
+          if [ -f "$PHP_LIB_PATH" ]; then
+            cp "$PHP_LIB_PATH" dist/lib/
+            echo "Copied libphp.so from $PHP_LIB_PATH"
+          else
+            echo "ERROR: Cannot find libphp.so at $PHP_LIB_PATH"
+            find /usr/local -name "libphp.so"
+            exit 1
+          fi
+          
+          # Verify the binary exists before attempting to copy dependencies
+          if [ ! -f "frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp" ]; then
+            echo "ERROR: FrankenPHP binary not found!"
+            find frankenphp-${FRANKENPHP_VERSION} -name "frankenphp"
+            exit 1
+          fi
+          
+          # Copy all required shared libraries
+          echo "Copying shared library dependencies..."
+          ldd frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
+          
+          # Copy the FrankenPHP binary
+          echo "Copying FrankenPHP binary..."
+          cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/frankenphp
+          chmod +x dist/frankenphp
+          
+          # Create archive
+          cd dist
+          tar -czf ../frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz .
+          cd ..
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frankenphp-${{ env.PHP_SHORT }}
+          path: frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz
+          retention-days: 7
+
+      # Create release for PHP 8.4
+      - name: Create Release for PHP 8.4
+        uses: softprops/action-gh-release@v1
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+        with:
+          files: frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz
+          tag_name: v${{ env.FRANKENPHP_VERSION }}-${{ env.PHP_SHORT }}-${{ github.run_number }}
+          name: FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
