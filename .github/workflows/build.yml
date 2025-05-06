@@ -22,6 +22,10 @@ jobs:
             php-short: 'php84'
             
     runs-on: ubuntu-latest
+    # Add explicit permissions for releases
+    permissions:
+      contents: write
+      
     env:
       FRANKENPHP_VERSION: '1.5.0'
     
@@ -136,15 +140,16 @@ jobs:
           path: frankenphp-linux-amd64-${{ matrix.php-short }}.tar.gz
           retention-days: 7
 
+      # Modified Release step that uses your existing PAT
       - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
+        uses: ncipollo/release-action@v1
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
         with:
-          tag_name: v${{ env.FRANKENPHP_VERSION }}-${{ matrix.php-short }}-${{ github.run_number }}
+          token: ${{ secrets.ORG_RELEASE_TOKEN }}  # Your existing PAT stored as a secret
+          tag: v${{ env.FRANKENPHP_VERSION }}-${{ matrix.php-short }}-${{ github.run_number }}
           name: FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ matrix.php-version }}
+          artifacts: frankenphp-linux-amd64-${{ matrix.php-short }}.tar.gz
           draft: false
           prerelease: false
-          files: frankenphp-linux-amd64-${{ matrix.php-short }}.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
+          generateReleaseNotes: true
+          allowUpdates: true
