@@ -140,7 +140,7 @@ jobs:
           path: frankenphp-linux-amd64-${{ matrix.php-short }}.tar.gz
           retention-days: 7
 
-      # Create GitHub Release - using different action and your custom token
+      # Create GitHub Release - ensure unique releases per PHP version
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -150,5 +150,7 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+          make_latest: false  # Ensure each release is independent
+          fail_on_unmatched_files: false  # Don't fail if some files aren't found
         env:
           GITHUB_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
