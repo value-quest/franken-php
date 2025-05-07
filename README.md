@@ -1,6 +1,8 @@
-# FrankenPHP Distribution
+# Franken PHP
 
-This package contains a standalone distribution of [FrankenPHP](https://frankenphp.dev/), a modern PHP application server built on top of the Caddy web server. It includes [PHP](https://www.php.net/), [Composer](https://getcomposer.org/), and all necessary libraries in a single, self-contained package.
+The releases contain a standalone distribution of [FrankenPHP](https://frankenphp.dev/), [PHP](https://www.php.net/), [Composer](https://getcomposer.org/) and all necessary libraries. 
+
+No further installation is needed to run your PHP app!
 
 ## Installation
 
@@ -9,7 +11,7 @@ This package contains a standalone distribution of [FrankenPHP](https://frankenp
    tar -xzf frankenphp-linux-amd64-php8*.tar.gz
    ```
 
-2. All files are contained within the extracted directory - no system-wide installation is needed.
+2. All files are contained within the extracted directory.
 
 ## Usage
 
