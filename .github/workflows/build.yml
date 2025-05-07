@@ -197,25 +197,20 @@ jobs: # Check for new releases first
           
           # Create a Caddyfile to serve the index.php on localhost:8000
           cat > dist/Caddyfile << EOF
-          { auto_https off
+          { 
+            auto_https off
             http_port 8000
             https_port 0
-            frankenphp }
+            frankenphp
+          }
         
           localhost:8000 {
-          root * .
-          encode gzip
-          php_server }
+            root * .
+            encode gzip
+            php_server 
+          }
           EOF
-        
-          # Create an example shell script to run the server
-          cat > dist/run-server.sh << EOF
-          #!/bin/bash
-          # Run FrankenPHP with the Caddyfile
-          ./frankenphp run
-          EOF
-          chmod +x dist/run-server.sh
-          
+      
           # Create wrapper script to add bin to PATH
           cat > dist/setup-env.sh << EOF
           #!/bin/bash
