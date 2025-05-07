@@ -199,7 +199,7 @@ jobs:
           cat > dist/version.php << EOF
           <?php
           echo "FrankenPHP v${FRANKENPHP_VERSION} with PHP " . PHP_VERSION . "\n";
-          echo "Composer: " . shell_exec("\$_SERVER['PWD']/bin/composer --version") . "\n";
+          echo "Composer: " . shell_exec("bin/composer --version") . "\n";
           EOF
           
           # Create archive
