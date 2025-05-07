@@ -195,11 +195,19 @@ jobs:
           EOF
           chmod +x dist/setup-env.sh
           
-          # Create a simple version check script
-          cat > dist/version.php << EOF
+          # Create a simple version check script as index.php
+          cat > dist/index.php << EOF
           <?php
           echo "FrankenPHP v${FRANKENPHP_VERSION} with PHP " . PHP_VERSION . "\n";
-          echo "Composer: " . shell_exec("bin/composer --version") . "\n";
+          echo "Composer: " . shell_exec(\$_SERVER['PWD'] . "/bin/composer --version") . "\n";
+          EOF
+          
+          # Create a simple Caddyfile to serve the index.php on port 8000
+          cat > dist/Caddyfile << EOF
+          :8000 {
+            root * .
+            php_server
+          }
           EOF
           
           # Create archive
