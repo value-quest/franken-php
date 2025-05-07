@@ -6,12 +6,11 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
-    # Allow manual triggering
+  # Allow manual triggering
   schedule:
     - cron: '0 0 * * *'  # Run daily at midnight to check for new FrankenPHP releases
 
-jobs:
-  # Check for new releases first
+jobs: # Check for new releases first
   check-new-release:
     runs-on: ubuntu-latest
     outputs:
@@ -23,13 +22,13 @@ jobs:
         id: get-current
         run: |
           echo "current_version=1.5.0" >> $GITHUB_OUTPUT
-      
+
       - name: Get latest release from GitHub API
         id: get-latest
         run: |
           LATEST_VERSION=$(curl -s https://api.github.com/repos/dunglas/frankenphp/releases/latest | jq -r '.tag_name' | sed 's/v//')
           echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
-      
+
       - name: Check if there's a new version
         id: check-new
         run: |
@@ -54,9 +53,9 @@ jobs:
     strategy:
       matrix:
         php:
-          - {version: '8.3.20', short: 'php83'}
-          - {version: '8.4.6', short: 'php84'}
-      
+          - { version: '8.3.20', short: 'php83' }
+          - { version: '8.4.6', short: 'php84' }
+    
     env:
       FRANKENPHP_VERSION: ${{ needs.check-new-release.outputs.latest_version }}
       PHP_VERSION: ${{ matrix.php.version }}
@@ -65,7 +64,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        
+
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -190,60 +189,56 @@ jobs:
           chmod +x dist/frankenphp
           
           # Create index.php with version information
-          cat > dist/index.php << 'EOF'
-<?php
-echo "FrankenPHP v" . getenv('FRANKENPHP_VERSION') . " with PHP " . PHP_VERSION . "\n";
-echo "Composer: " . shell_exec($_SERVER['PWD'] . "/bin/composer --version") . "\n";
-EOF
+          cat > dist/index.php << EOF
+          <?php
+          echo "FrankenPHP v${FRANKENPHP_VERSION} with PHP " . PHP_VERSION . "\n";
+          echo "Composer: " . shell_exec(\$_SERVER['PWD'] . "/bin/composer --version") . "\n";
+          EOF
           
           # Create a Caddyfile to serve the index.php on localhost:8000
-          cat > dist/Caddyfile << 'EOF'
-{
-  auto_https off
-  http_port 8000
-  https_port 0
-  frankenphp
-}
-
-localhost:8000 {
-  root * .
-  encode gzip
-  php_server
-}
-EOF
-          
+          cat > dist/Caddyfile << EOF
+          { auto_https off
+            http_port 8000
+            https_port 0
+            frankenphp }
+        
+          localhost:8000 {
+          root * .
+          encode gzip
+          php_server }
+          EOF
+        
           # Create an example shell script to run the server
-          cat > dist/run-server.sh << 'EOF'
-#!/bin/bash
-# Run FrankenPHP with the Caddyfile
-export FRANKENPHP_VERSION="${FRANKENPHP_VERSION:-1.5.0}"
-./frankenphp run
-EOF
+          cat > dist/run-server.sh << EOF
+          #!/bin/bash
+          # Run FrankenPHP with the Caddyfile
+          ./frankenphp run
+          EOF
           chmod +x dist/run-server.sh
           
           # Create wrapper script to add bin to PATH
-          cat > dist/setup-env.sh << 'EOF'
-#!/bin/bash
-# Add the bin directory to PATH
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
-export PATH="$SCRIPT_DIR/bin:$PATH"
-export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
-echo "FrankenPHP environment set up. You can now use 'php', 'composer', and 'frankenphp' commands."
-EOF
+          cat > dist/setup-env.sh << EOF
+          #!/bin/bash
+          # Add the bin directory to PATH
+          SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+          export PATH="\$SCRIPT_DIR/bin:\$PATH"
+          export LD_LIBRARY_PATH="\$SCRIPT_DIR/lib:\$LD_LIBRARY_PATH"
+          echo "FrankenPHP environment set up. You can now use 'php', 'composer', and 'frankenphp' commands."
+          EOF
           chmod +x dist/setup-env.sh
-          
+        
           # Create archive
           cd dist
           tar -czf ../frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz .
           cd ..
-
+      
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: frankenphp-${{ env.PHP_SHORT }}
           path: frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz
           retention-days: 7
-
+      
       # Create release
       - name: Create Release
         uses: softprops/action-gh-release@v1
