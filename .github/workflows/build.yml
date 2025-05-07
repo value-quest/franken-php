@@ -82,13 +82,28 @@ jobs:
         run: |
           # Build with rpath set to $ORIGIN/lib
           CGO_CFLAGS=$(php-config --includes) \
-          CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs) -Wl,-rpath,\$ORIGIN/../lib" \
+          CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs) -Wl,-rpath,\$ORIGIN/lib" \
           go build -tags=nobadger,nomysql,nopgx,nowatcher
+
+      - name: Create version helper
+        run: |
+          cat > frankenphp-version << 'EOF'
+          #!/bin/bash
+          if [ "$1" = "-v" ]; then
+            PHP_VERSION=$(./bin/php -r 'echo PHP_VERSION;')
+            echo "FrankenPHP v${FRANKENPHP_VERSION} with PHP ${PHP_VERSION}"
+            exit 0
+          fi
+          # Pass all arguments to the real frankenphp binary
+          $(dirname "$0")/frankenphp "$@"
+          EOF
+          chmod +x frankenphp-version
 
       - name: Package FrankenPHP with libraries
         run: |
           # Create directories
           mkdir -p dist/lib
+          mkdir -p dist/bin
           
           # Debug: Check if libphp.so exists and its location
           find /usr -name "libphp.so" || echo "libphp.so not found in /usr"
@@ -105,6 +120,13 @@ jobs:
             exit 1
           fi
           
+          # Copy PHP binaries
+          PHP_BIN_PATH="$(php-config --prefix)/bin"
+          cp "$PHP_BIN_PATH/php" dist/bin/
+          cp "$PHP_BIN_PATH/php-config" dist/bin/
+          cp "$PHP_BIN_PATH/phpize" dist/bin/
+          echo "Copied PHP binaries from $PHP_BIN_PATH"
+          
           # Verify the binary exists before attempting to copy dependencies
           if [ ! -f "frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp" ]; then
             echo "ERROR: FrankenPHP binary not found!"
@@ -116,10 +138,23 @@ jobs:
           echo "Copying shared library dependencies..."
           ldd frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
           
-          # Copy the FrankenPHP binary
+          # Copy the FrankenPHP binary and version helper
           echo "Copying FrankenPHP binary..."
           cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/frankenphp
+          cp frankenphp-version dist/frankenphp-version
           chmod +x dist/frankenphp
+          chmod +x dist/frankenphp-version
+          
+          # Create wrapper script to add bin to PATH
+          cat > dist/setup-env.sh << 'EOF'
+          #!/bin/bash
+          # Add the bin directory to PATH
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+          export PATH="$SCRIPT_DIR/bin:$PATH"
+          export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
+          echo "FrankenPHP environment set up. You can now use 'php' and 'frankenphp' commands."
+          EOF
+          chmod +x dist/setup-env.sh
           
           # Create archive
           cd dist
@@ -218,13 +253,28 @@ jobs:
         run: |
           # Build with rpath set to $ORIGIN/lib
           CGO_CFLAGS=$(php-config --includes) \
-          CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs) -Wl,-rpath,\$ORIGIN/../lib" \
+          CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs) -Wl,-rpath,\$ORIGIN/lib" \
           go build -tags=nobadger,nomysql,nopgx,nowatcher
+
+      - name: Create version helper
+        run: |
+          cat > frankenphp-version << 'EOF'
+          #!/bin/bash
+          if [ "$1" = "-v" ]; then
+            PHP_VERSION=$(./bin/php -r 'echo PHP_VERSION;')
+            echo "FrankenPHP v${FRANKENPHP_VERSION} with PHP ${PHP_VERSION}"
+            exit 0
+          fi
+          # Pass all arguments to the real frankenphp binary
+          $(dirname "$0")/frankenphp "$@"
+          EOF
+          chmod +x frankenphp-version
 
       - name: Package FrankenPHP with libraries
         run: |
           # Create directories
           mkdir -p dist/lib
+          mkdir -p dist/bin
           
           # Debug: Check if libphp.so exists and its location
           find /usr -name "libphp.so" || echo "libphp.so not found in /usr"
@@ -241,6 +291,13 @@ jobs:
             exit 1
           fi
           
+          # Copy PHP binaries
+          PHP_BIN_PATH="$(php-config --prefix)/bin"
+          cp "$PHP_BIN_PATH/php" dist/bin/
+          cp "$PHP_BIN_PATH/php-config" dist/bin/
+          cp "$PHP_BIN_PATH/phpize" dist/bin/
+          echo "Copied PHP binaries from $PHP_BIN_PATH"
+          
           # Verify the binary exists before attempting to copy dependencies
           if [ ! -f "frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp" ]; then
             echo "ERROR: FrankenPHP binary not found!"
@@ -252,10 +309,23 @@ jobs:
           echo "Copying shared library dependencies..."
           ldd frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
           
-          # Copy the FrankenPHP binary
+          # Copy the FrankenPHP binary and version helper
           echo "Copying FrankenPHP binary..."
           cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/frankenphp
+          cp frankenphp-version dist/frankenphp-version
           chmod +x dist/frankenphp
+          chmod +x dist/frankenphp-version
+          
+          # Create wrapper script to add bin to PATH
+          cat > dist/setup-env.sh << 'EOF'
+          #!/bin/bash
+          # Add the bin directory to PATH
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+          export PATH="$SCRIPT_DIR/bin:$PATH"
+          export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
+          echo "FrankenPHP environment set up. You can now use 'php' and 'frankenphp' commands."
+          EOF
+          chmod +x dist/setup-env.sh
           
           # Create archive
           cd dist
