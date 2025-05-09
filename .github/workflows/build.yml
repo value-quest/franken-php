@@ -71,7 +71,9 @@ jobs: # Check for new releases first
           sudo apt-get install -y build-essential curl ca-certificates \
             pkg-config libssl-dev zlib1g-dev libxml2-dev libbrotli-dev \
             autoconf automake libtool libsqlite3-dev libcurl4-openssl-dev libonig-dev \
-            libmariadb-dev libmariadb-dev-compat
+            libmariadb-dev libmariadb-dev-compat \
+            libzip-dev libpng-dev libjpeg-dev libfreetype6-dev \
+            libicu-dev libxslt1-dev
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -202,6 +204,12 @@ jobs: # Check for new releases first
           <?php
           echo "FrankenPHP v${FRANKENPHP_VERSION} with PHP " . PHP_VERSION . "\n";
           echo "Composer: " . shell_exec(\$_SERVER['PWD'] . "/bin/composer --version") . "\n";
+          
+          // Display loaded extensions
+          echo "\nLoaded PHP Extensions:\n";
+          $extensions = get_loaded_extensions();
+          sort($extensions);
+          echo implode(", ", $extensions) . "\n";
           EOF
           
           # Create a Caddyfile to serve the index.php on localhost:8000
