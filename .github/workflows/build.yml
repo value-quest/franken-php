@@ -93,6 +93,7 @@ jobs: # Check for new releases first
             --enable-zts \
             --disable-zend-signals \
             --enable-zend-max-execution-timers \
+            --enable-cli \
             --enable-mbstring \
             --with-openssl \
             --enable-xml \
@@ -107,7 +108,15 @@ jobs: # Check for new releases first
             --with-pdo-mysql \
             --with-mysqli \
             --enable-session \
-            --enable-tokenizer
+            --enable-tokenizer \
+            --enable-bcmath \
+            --with-zip \
+            --with-gd \
+            --enable-gd \
+            --with-freetype \
+            --with-jpeg \
+            --enable-intl \
+            --with-sqlite3
           make -j$(nproc)
           sudo make install
           sudo ldconfig
