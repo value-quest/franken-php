@@ -288,10 +288,22 @@ jobs: # Check for new releases first
         run: |
           STABLE_TAG="${{ steps.manage-release.outputs.stable_tag }}"
           
+          # Create a temporary file for release notes to avoid quote issues
+          cat > release-notes.md << 'EOF'
+          This is an automated build of FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}.
+          
+          This release replaces any previous release for PHP ${{ env.PHP_VERSION }} to ensure only one version is maintained.
+          
+          Last updated: $(date)
+          EOF
+          
           # Create the release using GitHub CLI
           gh release create "$STABLE_TAG" \
             "frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz" \
             --repo ${{ github.repository }} \
             --title "FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}" \
-            --notes "This is an automated build of FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}.
+            --notes-file release-notes.md \
             --latest=false
+          
+          # Clean up
+          rm release-notes.md
