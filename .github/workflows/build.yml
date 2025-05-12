@@ -51,6 +51,7 @@ jobs: # Check for new releases first
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     strategy:
       matrix:
         php:
@@ -252,62 +253,49 @@ jobs: # Check for new releases first
           path: frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz
           retention-days: 7
       
-      # Check for existing release tag
-      - name: Check for existing release tag
-        id: check-tag
+      # Check for existing release and delete if present
+      - name: Manage existing release
+        id: manage-release
+        env:
+          GH_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
         run: |
-          # Create a stable tag name based on PHP version only, without run number
+          # Create a stable tag name based on PHP version only
           STABLE_TAG="v${{ env.FRANKENPHP_VERSION }}-${{ env.PHP_SHORT }}"
           echo "stable_tag=$STABLE_TAG" >> $GITHUB_OUTPUT
           
-          # Check if tag exists
-          if git ls-remote --tags origin refs/tags/$STABLE_TAG | grep -q $STABLE_TAG; then
-            echo "Tag $STABLE_TAG already exists, will be replaced"
-            echo "tag_exists=true" >> $GITHUB_OUTPUT
+          # Install GitHub CLI if not already available
+          if ! command -v gh &> /dev/null; then
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt update
+            sudo apt install gh -y
+          fi
+          
+          # Check if release exists and delete it
+          echo "Checking for existing release with tag: $STABLE_TAG"
+          if gh release view "$STABLE_TAG" --repo ${{ github.repository }} &> /dev/null; then
+            echo "Existing release found. Deleting it..."
+            gh release delete "$STABLE_TAG" --repo ${{ github.repository }} --yes
+            echo "Release deleted successfully"
           else
-            echo "Tag $STABLE_TAG doesn't exist yet"
-            echo "tag_exists=false" >> $GITHUB_OUTPUT
+            echo "No existing release found"
           fi
-      
-      # Delete existing release if it exists
-      - name: Delete existing release
-        if: steps.check-tag.outputs.tag_exists == 'true'
-        run: |
-          # Delete existing tag
-          STABLE_TAG="${{ steps.check-tag.outputs.stable_tag }}"
-          
-          # Use GitHub API to get the release ID
-          RELEASE_ID=$(curl -s -H "Authorization: token ${{ secrets.ORG_RELEASE_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$STABLE_TAG" | \
-            jq -r '.id')
-          
-          if [ "$RELEASE_ID" != "null" ]; then
-            echo "Deleting existing release with ID: $RELEASE_ID"
-            curl -s -X DELETE -H "Authorization: token ${{ secrets.ORG_RELEASE_TOKEN }}" \
-              "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID"
-          fi
-          
-          # Delete existing tag (both locally and remotely)
-          git tag -d $STABLE_TAG || true
-          git push --delete origin $STABLE_TAG || true
-          
-          echo "Existing release and tag deleted"
       
       # Create release with stable tag
       - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz
-          tag_name: ${{ steps.check-tag.outputs.stable_tag }}
-          name: FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          body: |
-            This is an automated build of FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}.
-            
-            This release replaces any previous release for PHP ${{ env.PHP_VERSION }} to ensure only one version is maintained.
-            
-            Last updated: $(date)
         env:
-          GITHUB_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
+        run: |
+          STABLE_TAG="${{ steps.manage-release.outputs.stable_tag }}"
+          
+          # Create the release using GitHub CLI
+          gh release create "$STABLE_TAG" \
+            "frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz" \
+            --repo ${{ github.repository }} \
+            --title "FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}" \
+            --notes "This is an automated build of FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}.
+            
+This release replaces any previous release for PHP ${{ env.PHP_VERSION }} to ensure only one version is maintained.
+            
+Last updated: $(date)" \
+            --latest=false
