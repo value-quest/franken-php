@@ -294,8 +294,4 @@ jobs: # Check for new releases first
             --repo ${{ github.repository }} \
             --title "FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}" \
             --notes "This is an automated build of FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}.
-            
-This release replaces any previous release for PHP ${{ env.PHP_VERSION }} to ensure only one version is maintained.
-            
-Last updated: $(date)" \
             --latest=false
