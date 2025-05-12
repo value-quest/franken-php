@@ -275,10 +275,15 @@ jobs: # Check for new releases first
           echo "Checking for existing release with tag: $STABLE_TAG"
           if gh release view "$STABLE_TAG" --repo ${{ github.repository }} &> /dev/null; then
             echo "Existing release found. Deleting it..."
-            gh release delete "$STABLE_TAG" --repo ${{ github.repository }} --yes
-            echo "Release deleted successfully"
+            gh release delete "$STABLE_TAG" --repo ${{ github.repository }} --yes --cleanup-tag
+            echo "Release and tag deleted successfully"
           else
             echo "No existing release found"
+            # Check if tag exists without release and delete it
+            if git ls-remote --tags origin "refs/tags/$STABLE_TAG" | grep -q "$STABLE_TAG"; then
+              echo "Found orphaned tag. Deleting it..."
+              git push --delete origin "$STABLE_TAG" || true
+            fi
           fi
       
       # Create release with stable tag
@@ -288,22 +293,21 @@ jobs: # Check for new releases first
         run: |
           STABLE_TAG="${{ steps.manage-release.outputs.stable_tag }}"
           
-          # Create a temporary file for release notes to avoid quote issues
-          cat > release-notes.md << 'EOF'
-          This is an automated build of FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}.
+          # Create release notes with proper formatting
+          RELEASE_NOTES="This is an automated build of FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}.
           
-          This release replaces any previous release for PHP ${{ env.PHP_VERSION }} to ensure only one version is maintained.
+This release replaces any previous release for PHP ${{ env.PHP_VERSION }} to ensure only one version is maintained.
           
-          Last updated: $(date)
-          EOF
+Last updated: $(date '+%Y-%m-%d %H:%M:%S UTC')"
           
           # Create the release using GitHub CLI
+          echo "Creating new release: $STABLE_TAG"
           gh release create "$STABLE_TAG" \
             "frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz" \
             --repo ${{ github.repository }} \
             --title "FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}" \
-            --notes-file release-notes.md \
-            --latest=false
+            --notes "$RELEASE_NOTES" \
+            --latest=false \
+            --verify-tag=false
           
-          # Clean up
-          rm release-notes.md
+          echo "Release created successfully"
