@@ -339,15 +339,11 @@ jobs: # Check for new releases first
             - **PHP 8.3**: `frankenphp-linux-amd64-php83.tar.gz`
             - **PHP 8.4**: `frankenphp-linux-amd64-php84.tar.gz`
             
-            This release replaces any previous release for FrankenPHP v${{ env.FRANKENPHP_VERSION }} to ensure only the latest builds are maintained.
-            
             ## Features:
             - Includes FrankenPHP binary
             - PHP runtime
             - Composer
             - All necessary shared libraries
             - Setup script for environment configuration
-            
-            Last updated: $(date)
         env:
           GITHUB_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
