@@ -129,9 +129,9 @@ jobs: # Check for new releases first
       - name: Build FrankenPHP with rpath
         working-directory: frankenphp-${{ env.FRANKENPHP_VERSION }}/caddy/frankenphp
         run: |
-          # Build with rpath set to $ORIGIN/../lib since the binary will be in bin/
+          # Build with rpath set to both relative and absolute paths
           CGO_CFLAGS=$(php-config --includes) \
-          CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs) -Wl,-rpath,\$ORIGIN/../lib" \
+          CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs) -Wl,-rpath,\$ORIGIN/../lib -Wl,-rpath,/opt/frankenphp/lib" \
           go build -tags=nobadger,nomysql,nopgx,nowatcher
 
       - name: Download Composer
@@ -242,21 +242,299 @@ jobs: # Check for new releases first
           }
           EOF
       
+          # Create README file
+          cat > dist/README.md << 'EOF'
+          # FrankenPHP Distribution
+          
+          ## Quick Start
+          
+          ### For permanent setup (RECOMMENDED for servers):
+          ```bash
+          ./setup-env.sh --permanent
+          source ~/.bashrc
+          ```
+          
+          ### For current session only:
+          ```bash
+          source setup-env.sh
+          ```
+          
+          ## Setup Options
+          
+          The setup script supports multiple options:
+          
+          ```bash
+          # Set up for current session only
+          source setup-env.sh
+          
+          # Make setup permanent (adds to ~/.bashrc)
+          ./setup-env.sh --permanent
+          
+          # Remove permanent setup
+          ./setup-env.sh --remove
+          
+          # Show help
+          ./setup-env.sh --help
+          ```
+          
+          ## Usage
+          
+          After setup, you can use:
+          ```bash
+          frankenphp version
+          php -v
+          composer --version
+          ```
+          
+          ## Running the Demo Server
+          ```bash
+          frankenphp run --config Caddyfile
+          ```
+          
+          ## Uninstalling
+          
+          To remove the permanent setup:
+          ```bash
+          ./setup-env.sh --remove
+          ```
+          
+          ## Troubleshooting
+          
+          If you get errors like "cannot open shared object file":
+          1. Make sure you have run the setup script
+          2. For permanent setup: `./setup-env.sh --permanent`
+          3. For temporary setup: `source setup-env.sh`
+          
+          ## Contents
+          - `bin/` - Binary executables
+          - `lib/` - Shared libraries
+          - `setup-env.sh` - Environment setup script (with permanent option)
+          - `Caddyfile` - Example Caddy configuration
+          - `index.php` - Demo PHP file
+          EOF
+          
+          # Create setup instructions file
+          cat > dist/SETUP_INSTRUCTIONS.txt << 'EOF'
+          ============================================
+          IMPORTANT: SETUP REQUIRED BEFORE USE
+          ============================================
+          
+          You MUST run the following command before using FrankenPHP:
+          
+              source setup-env.sh
+          
+          This command sets up the environment variables needed for the
+          binaries to find their shared libraries.
+          
+          Without this step, you will get errors like:
+          "error while loading shared libraries: libzip.so.4: cannot open shared object file"
+          
+          For permanent setup, add the source command to your ~/.bashrc
+          ============================================
+          EOF
+          
           # Create wrapper script to add bin to PATH
-          cat > dist/setup-env.sh << EOF
+          cat > dist/setup-env.sh << 'EOF'
           #!/bin/bash
-          # Add the bin directory to PATH
-          SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
-          export PATH="\$SCRIPT_DIR/bin:\$PATH"
-          export LD_LIBRARY_PATH="\$SCRIPT_DIR/lib:\$LD_LIBRARY_PATH"
-          echo "FrankenPHP environment set up. You can now use 'php', 'composer', and 'frankenphp' commands."
-          echo "To run the demo server: cd \$SCRIPT_DIR && frankenphp run --config Caddyfile"
+          
+          # Get the directory where this script is located
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+          
+          # Function to set up environment for current session
+          setup_current_session() {
+              export PATH="$SCRIPT_DIR/bin:$PATH"
+              export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
+              echo "Environment set up for current session."
+          }
+          
+          # Function to make setup permanent
+          make_permanent() {
+              local BASHRC="$HOME/.bashrc"
+              local MARKER="# FrankenPHP environment setup"
+              
+              # Check if already installed
+              if grep -q "$MARKER" "$BASHRC" 2>/dev/null; then
+                  echo "FrankenPHP environment is already set up in $BASHRC"
+                  echo "To update the installation path, first remove the existing setup with:"
+                  echo "  $0 --remove"
+                  echo "Then run the setup again."
+                  return 1
+              fi
+              
+              # Create backup directory if it doesn't exist
+              mkdir -p "$HOME/.backup"
+              
+              # Backup .bashrc
+              cp "$BASHRC" "$HOME/.backup/.bashrc.$(date +%Y%m%d_%H%M%S)"
+              echo "Created backup of .bashrc"
+              
+              # Add to .bashrc
+              cat >> "$BASHRC" << EOL
+          
+          $MARKER
+          export PATH="$SCRIPT_DIR/bin:\$PATH"
+          export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:\$LD_LIBRARY_PATH"
+          # End of FrankenPHP environment setup
+          EOL
+              
+              echo "============================================"
+              echo "Permanent setup completed!"
+              echo "Added FrankenPHP environment to $BASHRC"
+              echo ""
+              echo "To apply changes to current session, run:"
+              echo "  source ~/.bashrc"
+              echo ""
+              echo "Or start a new terminal session."
+              echo "============================================"
+          }
+          
+          # Function to remove permanent setup
+          remove_permanent() {
+              local BASHRC="$HOME/.bashrc"
+              local MARKER="# FrankenPHP environment setup"
+              
+              if ! grep -q "$MARKER" "$BASHRC" 2>/dev/null; then
+                  echo "FrankenPHP environment setup not found in $BASHRC"
+                  return 1
+              fi
+              
+              # Create backup directory if it doesn't exist
+              mkdir -p "$HOME/.backup"
+              
+              # Backup .bashrc
+              cp "$BASHRC" "$HOME/.backup/.bashrc.$(date +%Y%m%d_%H%M%S)"
+              echo "Created backup of .bashrc"
+              
+              # Remove FrankenPHP setup
+              sed -i "/$MARKER/,/# End of FrankenPHP environment setup/d" "$BASHRC"
+              echo "Removed FrankenPHP environment setup from $BASHRC"
+          }
+          
+          # Main script logic
+          case "$1" in
+              "--remove"|"-r")
+                  remove_permanent
+                  ;;
+              "--temporary"|"-t"|"--temp")
+                  setup_current_session
+                  echo "============================================"
+                  echo "FrankenPHP environment set up for current session only!"
+                  echo "============================================"
+                  echo ""
+                  echo "You can now use:"
+                  echo "  - frankenphp"
+                  echo "  - php"
+                  echo "  - composer"
+                  echo ""
+                  echo "Note: This is temporary. For permanent setup, run:"
+                  echo "  $0"
+                  echo "============================================"
+                  ;;
+              "--help"|"-h")
+                  echo "FrankenPHP Setup Script"
+                  echo ""
+                  echo "Usage:"
+                  echo "  ./setup-env.sh                # Install permanently (DEFAULT)"
+                  echo "  ./setup-env.sh --temporary    # Set up for current session only"
+                  echo "  ./setup-env.sh --remove       # Remove permanent setup from ~/.bashrc"
+                  echo "  ./setup-env.sh --help         # Show this help message"
+                  echo ""
+                  echo "Options:"
+                  echo "  (default)         Make setup permanent (adds to ~/.bashrc)"
+                  echo "  -t, --temporary   Set up for current session only"
+                  echo "  -r, --remove      Remove permanent setup from ~/.bashrc"
+                  echo "  -h, --help        Show this help message"
+                  echo ""
+                  echo "For source usage (current session only):"
+                  echo "  source setup-env.sh"
+                  ;;
+              "")
+                  # Default behavior - make it permanent
+                  make_permanent
+                  ;;
+              *)
+                  echo "Unknown option: $1"
+                  echo "Run '$0 --help' for usage information"
+                  exit 1
+                  ;;
+          esac
+          
+          # Special handling when sourced (for backward compatibility)
+          if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+              # Script is being sourced
+              setup_current_session
+              echo "============================================"
+              echo "FrankenPHP environment set up for current session!"
+              echo "============================================"
+              echo ""
+              echo "You can now use:"
+              echo "  - frankenphp"
+              echo "  - php"
+              echo "  - composer"
+              echo ""
+              echo "Note: When sourced, setup is temporary."
+              echo "For permanent setup, run: ./$0"
+              echo "============================================"
+          fi
           EOF
           chmod +x dist/setup-env.sh
+        
+          # Create wrapper scripts that automatically set up the environment
+          echo "Creating wrapper scripts..."
+          
+          # FrankenPHP wrapper
+          cat > dist/frankenphp << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
+          exec "$SCRIPT_DIR/bin/frankenphp" "$@"
+          EOF
+          chmod +x dist/frankenphp
+          
+          # PHP wrapper
+          cat > dist/php << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
+          exec "$SCRIPT_DIR/bin/php" "$@"
+          EOF
+          chmod +x dist/php
+          
+          # Composer wrapper
+          cat > dist/composer << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
+          exec "$SCRIPT_DIR/bin/php" "$SCRIPT_DIR/bin/composer" "$@"
+          EOF
+          chmod +x dist/composer
         
           # Create archive
           cd dist
           tar -czf ../frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz .
+          cd ..
+          
+          # Create wrapper scripts for direct execution
+          mkdir -p dist-wrapped
+          cp -r dist/* dist-wrapped/
+          
+          # Create wrapper scripts that automatically set LD_LIBRARY_PATH
+          for binary in frankenphp php composer; do
+            cat > dist-wrapped/bin/${binary}-wrapper << EOF
+          #!/bin/bash
+          SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
+          export LD_LIBRARY_PATH="\$SCRIPT_DIR/../lib:\$LD_LIBRARY_PATH"
+          exec "\$SCRIPT_DIR/${binary}" "\$@"
+          EOF
+            chmod +x dist-wrapped/bin/${binary}-wrapper
+            # Optionally rename the wrapper to the original name
+            mv dist-wrapped/bin/${binary} dist-wrapped/bin/${binary}.real
+            mv dist-wrapped/bin/${binary}-wrapper dist-wrapped/bin/${binary}
+          done
+          
+          # Create the final archive with wrappers
+          cd dist-wrapped
+          tar -czf ../frankenphp-linux-amd64-${{ env.PHP_SHORT }}-wrapped.tar.gz .
           cd ..
       
       - name: Upload binary artifact
@@ -351,18 +629,45 @@ jobs: # Check for new releases first
           body: |
             This is an automated build of FrankenPHP v${{ env.FRANKENPHP_VERSION }} with multiple PHP versions.
             
+            ## ⚠️ Setup Required
+            
+            **For servers (permanent setup):**
+            ```bash
+            ./setup-env.sh --permanent
+            source ~/.bashrc
+            ```
+            
+            **For testing (current session only):**
+            ```bash
+            source setup-env.sh
+            ```
+            
             ## Available Downloads:
             - **PHP 8.3**: `frankenphp-linux-amd64-php83.tar.gz`
             - **PHP 8.4**: `frankenphp-linux-amd64-php84.tar.gz`
             
-            This release replaces any previous release for FrankenPHP v${{ env.FRANKENPHP_VERSION }} to ensure only the latest builds are maintained.
+            ## Quick Start:
+            ```bash
+            tar -xzf frankenphp-linux-amd64-php84.tar.gz
+            cd frankenphp-linux-amd64-php84
+            ./setup-env.sh --permanent
+            source ~/.bashrc
+            frankenphp version
+            ```
             
             ## Features:
             - Includes FrankenPHP binary
             - PHP runtime
             - Composer
             - All necessary shared libraries
-            - Setup script for environment configuration
+            - Setup script with permanent installation option
+            - README with detailed instructions
+            
+            ## Setup Script Options:
+            - `./setup-env.sh --permanent` - Add to ~/.bashrc for permanent setup
+            - `source setup-env.sh` - Set up for current session only
+            - `./setup-env.sh --remove` - Remove permanent setup
+            - `./setup-env.sh --help` - Show all options
             
             Last updated: $(date)
         env:
