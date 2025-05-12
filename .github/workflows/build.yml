@@ -129,9 +129,9 @@ jobs: # Check for new releases first
       - name: Build FrankenPHP with rpath
         working-directory: frankenphp-${{ env.FRANKENPHP_VERSION }}/caddy/frankenphp
         run: |
-          # Build with rpath set to $ORIGIN/lib
+          # Build with rpath set to $ORIGIN/../lib since the binary will be in bin/
           CGO_CFLAGS=$(php-config --includes) \
-          CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs) -Wl,-rpath,\$ORIGIN/lib" \
+          CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs) -Wl,-rpath,\$ORIGIN/../lib" \
           go build -tags=nobadger,nomysql,nopgx,nowatcher
 
       - name: Download Composer
@@ -208,10 +208,10 @@ jobs: # Check for new releases first
             find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/local/lib -name "$lib" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
           done
           
-          # Copy the FrankenPHP binary
+          # Copy the FrankenPHP binary to bin directory
           echo "Copying FrankenPHP binary..."
-          cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/frankenphp
-          chmod +x dist/frankenphp
+          cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/bin/frankenphp
+          chmod +x dist/bin/frankenphp
           
           # Create index.php with version information
           cat > dist/index.php << EOF
@@ -250,6 +250,7 @@ jobs: # Check for new releases first
           export PATH="\$SCRIPT_DIR/bin:\$PATH"
           export LD_LIBRARY_PATH="\$SCRIPT_DIR/lib:\$LD_LIBRARY_PATH"
           echo "FrankenPHP environment set up. You can now use 'php', 'composer', and 'frankenphp' commands."
+          echo "To run the demo server: cd \$SCRIPT_DIR && frankenphp run --config Caddyfile"
           EOF
           chmod +x dist/setup-env.sh
         
