@@ -49,8 +49,6 @@ jobs: # Check for new releases first
     # Always run for manual dispatch, push to main, or PRs, or if a new version is detected during scheduled runs
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'pull_request' || needs.check-new-release.outputs.has_new_version == 'true' }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     strategy:
       matrix:
         php:
@@ -251,13 +249,44 @@ jobs: # Check for new releases first
           name: frankenphp-${{ env.PHP_SHORT }}
           path: frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz
           retention-days: 7
+
+  # Create a single release with all artifacts
+  create-release:
+    needs: [check-new-release, build-php]
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'pull_request' || needs.check-new-release.outputs.has_new_version == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    env:
+      FRANKENPHP_VERSION: ${{ needs.check-new-release.outputs.latest_version }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
       
+      # Download all artifacts
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts/
+
+      # Prepare all files for release
+      - name: Prepare release files
+        run: |
+          mkdir -p release-files
+          # Move all tar.gz files to release directory
+          find release-artifacts -name "*.tar.gz" -exec mv {} release-files/ \;
+          # List all files that will be released
+          echo "Files to be released:"
+          ls -la release-files/
+
       # Check for existing release tag
       - name: Check for existing release tag
         id: check-tag
         run: |
-          # Create a stable tag name based on PHP version only, without run number
-          STABLE_TAG="v${{ env.FRANKENPHP_VERSION }}-${{ env.PHP_SHORT }}"
+          # Create a stable tag name based on FrankenPHP version only
+          STABLE_TAG="v${{ env.FRANKENPHP_VERSION }}"
           echo "stable_tag=$STABLE_TAG" >> $GITHUB_OUTPUT
           
           # Check if tag exists
@@ -293,20 +322,31 @@ jobs: # Check for new releases first
           
           echo "Existing release and tag deleted"
       
-      # Create release with stable tag
+      # Create release with all PHP version assets
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz
+          files: release-files/*
           tag_name: ${{ steps.check-tag.outputs.stable_tag }}
-          name: FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}
+          name: FrankenPHP v${{ env.FRANKENPHP_VERSION }}
           draft: false
           prerelease: false
           generate_release_notes: true
           body: |
-            This is an automated build of FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ env.PHP_VERSION }}.
+            This is an automated build of FrankenPHP v${{ env.FRANKENPHP_VERSION }} with multiple PHP versions.
             
-            This release replaces any previous release for PHP ${{ env.PHP_VERSION }} to ensure only one version is maintained.
+            ## Available Downloads:
+            - **PHP 8.3**: `frankenphp-linux-amd64-php83.tar.gz`
+            - **PHP 8.4**: `frankenphp-linux-amd64-php84.tar.gz`
+            
+            This release replaces any previous release for FrankenPHP v${{ env.FRANKENPHP_VERSION }} to ensure only the latest builds are maintained.
+            
+            ## Features:
+            - Includes FrankenPHP binary
+            - PHP runtime
+            - Composer
+            - All necessary shared libraries
+            - Setup script for environment configuration
             
             Last updated: $(date)
         env:
