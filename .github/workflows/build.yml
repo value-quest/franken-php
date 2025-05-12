@@ -191,7 +191,22 @@ jobs: # Check for new releases first
           
           # Copy all required shared libraries
           echo "Copying shared library dependencies..."
+          # Copy libraries required by FrankenPHP
           ldd frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
+          
+          # Copy libraries required by PHP binary
+          echo "Copying PHP binary dependencies..."
+          ldd "$PHP_BIN_PATH/php" | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
+          
+          # Copy libraries required by libphp.so
+          echo "Copying libphp.so dependencies..."
+          ldd "$PHP_LIB_PATH" | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
+          
+          # Copy additional libraries that might be needed (common PHP dependencies)
+          echo "Copying additional common libraries..."
+          for lib in libzip.so* libpng16.so* libjpeg.so* libfreetype.so* libicu*.so* libonig.so* libxml2.so* libxslt.so* libgd.so* libssl.so* libcrypto.so* libcurl.so* libmariadb.so* libmysqlclient.so*; do
+            find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/local/lib -name "$lib" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
+          done
           
           # Copy the FrankenPHP binary
           echo "Copying FrankenPHP binary..."
@@ -339,11 +354,15 @@ jobs: # Check for new releases first
             - **PHP 8.3**: `frankenphp-linux-amd64-php83.tar.gz`
             - **PHP 8.4**: `frankenphp-linux-amd64-php84.tar.gz`
             
+            This release replaces any previous release for FrankenPHP v${{ env.FRANKENPHP_VERSION }} to ensure only the latest builds are maintained.
+            
             ## Features:
             - Includes FrankenPHP binary
             - PHP runtime
             - Composer
             - All necessary shared libraries
             - Setup script for environment configuration
+            
+            Last updated: $(date)
         env:
           GITHUB_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
