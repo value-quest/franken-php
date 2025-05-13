@@ -72,7 +72,7 @@ jobs: # Check for new releases first
             autoconf automake libtool libsqlite3-dev libcurl4-openssl-dev libonig-dev \
             libmariadb-dev libmariadb-dev-compat \
             libzip-dev libpng-dev libjpeg-dev libfreetype6-dev \
-            libicu-dev libxslt1-dev
+            libicu-dev libxslt1-dev sqlite3
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -181,6 +181,15 @@ jobs: # Check for new releases first
           # Copy Composer
           cp composer.phar dist/bin/composer
           chmod +x dist/bin/composer
+          
+          # Copy sqlite3 binary if available
+          if command -v sqlite3 &> /dev/null; then
+              cp $(which sqlite3) dist/bin/
+              echo "Copied sqlite3 binary"
+          else
+              echo "sqlite3 binary not found in system"
+          fi
+          
           echo "Copied PHP binaries and Composer from $PHP_BIN_PATH"
           
           # Verify the binary exists before attempting to copy dependencies
@@ -265,10 +274,13 @@ jobs: # Check for new releases first
           ## What It Does
           
           The setup script adds FrankenPHP to your system PATH by modifying `~/.bash_profile`. 
+          It also ensures `.bashrc` is sourced for interactive shells.
+          
           This makes the following commands available globally in both interactive and non-interactive shells:
           - `frankenphp` (from bin/frankenphp)
           - `php` (from bin/php)
           - `composer` (from bin/composer)
+          - `sqlite3` (from bin/sqlite3, if available)
           
           ## Running the Demo Server
           
@@ -295,7 +307,8 @@ jobs: # Check for new releases first
           │   ├── php
           │   ├── php-config
           │   ├── phpize
-          │   └── composer
+          │   ├── composer
+          │   └── sqlite3       # If available
           ├── lib/              # Shared libraries
           ├── setup-env.sh      # Installation script
           ├── Caddyfile         # Example configuration
@@ -344,12 +357,25 @@ jobs: # Check for new releases first
           
           # Setup configuration
           PROFILE="$HOME/.bash_profile"
+          BASHRC="$HOME/.bashrc"
           MARKER="# FrankenPHP environment setup"
           
           # Create .bash_profile if it doesn't exist
           if [ ! -f "$PROFILE" ]; then
               echo "Creating $PROFILE"
               touch "$PROFILE"
+          fi
+          
+          # Check if .bash_profile sources .bashrc (for interactive shells)
+          if ! grep -q "source.*\.bashrc\|\..*\.bashrc" "$PROFILE" 2>/dev/null; then
+              echo "Adding .bashrc sourcing to .bash_profile"
+              cat >> "$PROFILE" << 'EOL'
+          
+          # Source .bashrc for interactive shells
+          if [ -f ~/.bashrc ]; then
+              . ~/.bashrc
+          fi
+          EOL
           fi
           
           # Check if already installed
