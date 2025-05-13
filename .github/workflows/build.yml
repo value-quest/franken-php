@@ -1,4 +1,8 @@
-name: Build FrankenPHP with PHP 8.3 and 8.4
+- name: Install Node.js
+        run: |
+          # Install Node.js 20.x (LTS)
+          curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+          sudo apt-get install -y nodejsname: Build FrankenPHP with PHP 8.3 and 8.4
 
 on:
   push:
@@ -72,7 +76,7 @@ jobs: # Check for new releases first
             autoconf automake libtool libsqlite3-dev libcurl4-openssl-dev libonig-dev \
             libmariadb-dev libmariadb-dev-compat \
             libzip-dev libpng-dev libjpeg-dev libfreetype6-dev \
-            libicu-dev libxslt1-dev sqlite3
+            libicu-dev libxslt1-dev sqlite3 zip unzip git
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -80,6 +84,12 @@ jobs: # Check for new releases first
           go-version: '1.24'
           # Disable cache since we don't have a go.sum file in the root
           cache: false
+
+      - name: Install Node.js
+        run: |
+          # Install Node.js 20.x (LTS)
+          curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+          sudo apt-get install -y nodejs
 
       - name: Get PHP ${{ env.PHP_VERSION }}
         run: |
@@ -190,6 +200,114 @@ jobs: # Check for new releases first
               echo "sqlite3 binary not found in system"
           fi
           
+          # Copy zip and unzip if available
+          if command -v zip &> /dev/null; then
+              cp $(which zip) dist/bin/
+              echo "Copied zip binary"
+          fi
+          
+          if command -v unzip &> /dev/null; then
+              cp $(which unzip) dist/bin/
+              echo "Copied unzip binary"
+          fi
+          
+          # Copy git and its dependencies
+          if command -v git &> /dev/null; then
+              # Copy git binary
+              cp $(which git) dist/bin/
+              echo "Copied git binary"
+              
+              # Git needs several helper programs, let's copy the essential ones
+              GIT_EXEC_PATH=$(git --exec-path)
+              if [ -d "$GIT_EXEC_PATH" ]; then
+                  mkdir -p dist/libexec/git-core
+                  # Copy ALL git helper programs
+                  cp -r "$GIT_EXEC_PATH"/* dist/libexec/git-core/
+                  echo "Copied git helper programs"
+                  
+                  # Create a wrapper for git to set GIT_EXEC_PATH
+                  mv dist/bin/git dist/bin/git.real
+                  cat > dist/bin/git << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export GIT_EXEC_PATH="$SCRIPT_DIR/../libexec/git-core"
+          export GIT_TEMPLATE_DIR="$SCRIPT_DIR/../share/git-core/templates"
+          exec "$SCRIPT_DIR/git.real" "$@"
+          EOF
+                  chmod +x dist/bin/git
+                  echo "Created git wrapper script"
+                  
+                  # Copy git templates if they exist
+                  GIT_TEMPLATE_DIR="/usr/share/git-core/templates"
+                  if [ -d "$GIT_TEMPLATE_DIR" ]; then
+                      mkdir -p dist/share/git-core
+                      cp -r "$GIT_TEMPLATE_DIR" dist/share/git-core/
+                      echo "Copied git templates"
+                  fi
+              fi
+              
+              # Copy git dependencies libraries
+              for lib in $(ldd $(which git) | grep "=> /" | awk '{print $3}'); do
+                  if [[ ! "$lib" =~ libc.so|ld-linux ]]; then
+                      cp "$lib" dist/lib/ 2>/dev/null || true
+                  fi
+              done
+          fi
+          
+          # Copy Node.js and npm
+          if command -v node &> /dev/null; then
+              # Copy node binary
+              cp $(which node) dist/bin/
+              echo "Copied node binary"
+              
+              # Copy npm, npx and related files
+              NPM_PREFIX=$(npm config get prefix)
+              NODE_VERSION=$(node --version)
+              
+              # Create necessary directories
+              mkdir -p dist/lib/node_modules
+              
+              # Copy npm module
+              if [ -d "$NPM_PREFIX/lib/node_modules/npm" ]; then
+                  cp -r "$NPM_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
+                  echo "Copied npm module"
+              fi
+              
+              # Copy npm and npx executables
+              if [ -f "$NPM_PREFIX/bin/npm" ]; then
+                  cp "$NPM_PREFIX/bin/npm" dist/bin/
+                  chmod +x dist/bin/npm
+                  echo "Copied npm executable"
+              fi
+              
+              if [ -f "$NPM_PREFIX/bin/npx" ]; then
+                  cp "$NPM_PREFIX/bin/npx" dist/bin/
+                  chmod +x dist/bin/npx
+                  echo "Copied npx executable"
+              fi
+              
+              # Create wrapper scripts that set NODE_PATH
+              cat > dist/bin/npm-wrapper << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export NODE_PATH="$SCRIPT_DIR/../lib/node_modules"
+          exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npm-cli.js" "$@"
+          EOF
+              chmod +x dist/bin/npm-wrapper
+              mv dist/bin/npm-wrapper dist/bin/npm
+              
+              cat > dist/bin/npx-wrapper << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export NODE_PATH="$SCRIPT_DIR/../lib/node_modules"
+          exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npx-cli.js" "$@"
+          EOF
+              chmod +x dist/bin/npx-wrapper
+              mv dist/bin/npx-wrapper dist/bin/npx
+              
+              echo "Created npm and npx wrapper scripts"
+          fi
+          
           echo "Copied PHP binaries and Composer from $PHP_BIN_PATH"
           
           # Verify the binary exists before attempting to copy dependencies
@@ -236,6 +354,25 @@ jobs: # Check for new releases first
           echo implode(", ", $extensions) . "\n";
           EOF
           
+          # Create a demo Node.js file
+          cat > dist/demo.js << 'EOF'
+          console.log("Node.js version:", process.version);
+          console.log("NPM location:", process.env.npm_execpath || "Not running via npm");
+          console.log("Current directory:", process.cwd());
+          
+          // Simple HTTP server demo
+          const http = require('http');
+          const server = http.createServer((req, res) => {
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end('Hello from Node.js!\n');
+          });
+          
+          const port = 3000;
+          server.listen(port, () => {
+            console.log(`Node.js server running at http://localhost:${port}/`);
+          });
+          EOF
+          
           # Create a Caddyfile to serve the index.php on localhost:8000
           cat > dist/Caddyfile << EOF
           { 
@@ -269,6 +406,9 @@ jobs: # Check for new releases first
           frankenphp version
           php -v
           composer --version
+          node --version
+          npm --version
+          git --version
           ```
           
           ## What It Does
@@ -277,15 +417,28 @@ jobs: # Check for new releases first
           It also ensures `.bashrc` is sourced for interactive shells.
           
           This makes the following commands available globally in both interactive and non-interactive shells:
-          - `frankenphp` (from bin/frankenphp)
-          - `php` (from bin/php)
-          - `composer` (from bin/composer)
-          - `sqlite3` (from bin/sqlite3, if available)
+          - `frankenphp` - FrankenPHP web server
+          - `php` - PHP runtime
+          - `composer` - PHP package manager
+          - `node` - Node.js runtime
+          - `npm` - Node.js package manager
+          - `npx` - Node.js package executor
+          - `git` - Version control system
+          - `sqlite3` - SQLite database tool
+          - `zip` - File compression tool
+          - `unzip` - File extraction tool
           
           ## Running the Demo Server
           
+          ### PHP with FrankenPHP
           ```bash
           frankenphp run --config Caddyfile
+          ```
+          
+          ### Node.js Demo
+          ```bash
+          node demo.js
+          # Server will run on http://localhost:3000
           ```
           
           ## Manual Uninstallation
@@ -308,11 +461,22 @@ jobs: # Check for new releases first
           │   ├── php-config
           │   ├── phpize
           │   ├── composer
-          │   └── sqlite3       # If available
+          │   ├── node
+          │   ├── npm
+          │   ├── npx
+          │   ├── git
+          │   ├── sqlite3
+          │   ├── zip
+          │   └── unzip
           ├── lib/              # Shared libraries
+          │   └── node_modules/ # Node.js modules
+          │       └── npm/
+          ├── libexec/          # Git helper programs
+          │   └── git-core/
           ├── setup-env.sh      # Installation script
           ├── Caddyfile         # Example configuration
           ├── index.php         # Demo PHP file
+          ├── demo.js           # Demo Node.js file
           └── README.md         # This file
           ```
           
@@ -326,6 +490,13 @@ jobs: # Check for new releases first
           - Networking: curl, openssl
           - Math: bcmath
           - Internationalization: intl
+          
+          ## Development Tools
+          
+          - **Node.js 20.x LTS** with npm and npx for JavaScript/TypeScript development
+          - **Git** for version control
+          - **zip/unzip** for file compression and extraction
+          - **SQLite3** for database operations
           EOF
           
           # Create setup instructions file
@@ -554,16 +725,34 @@ jobs: # Check for new releases first
             ## Features:
             - FrankenPHP binary with PHP runtime including ext-zlib
             - Composer package manager
+            - Node.js 20.x LTS with npm and npx
+            - Git version control system
+            - SQLite3 command-line tool
+            - zip/unzip utilities
             - All required shared libraries
             - Simple one-command installation
-            - Works in both interactive and non-interactive shells (cron, SSH commands)
+            - Works in both interactive and non-interactive shells
             - PHP extensions: mbstring, xml, pdo, mysql, zip, gd, curl, openssl, intl, zlib, and more
             
             ## What's New:
-            - Now installs to `~/.bash_profile` for better compatibility with non-interactive shells
-            - Added ext-zlib support
-            - Simplified setup script (permanent installation only)
-            - Cleaner directory structure (binaries only in bin/)
+            - Added Git version control system
+            - Added zip and unzip utilities
+            - Enhanced Node.js integration with proper wrapper scripts
+            - Improved git integration with helper programs
+            
+            ## Complete Toolset:
+            - `frankenphp` - High-performance PHP web server
+            - `php` - PHP 8.3/8.4 runtime
+            - `composer` - PHP dependency manager
+            - `node` - Node.js runtime
+            - `npm` - Node.js package manager
+            - `npx` - Node.js package executor
+            - `git` - Version control
+            - `sqlite3` - SQLite database CLI
+            - `zip` - Create compressed archives
+            - `unzip` - Extract compressed archives
+            
+            This distribution provides a complete web development environment with PHP, Node.js, and essential tools.
             
             To uninstall, manually remove the FrankenPHP section from your ~/.bash_profile file.
             
