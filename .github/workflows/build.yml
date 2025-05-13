@@ -254,7 +254,7 @@ jobs: # Check for new releases first
           ./setup-env.sh
           
           # Apply changes to current session
-          source ~/.bashrc
+          source ~/.bash_profile
           
           # Test installation
           frankenphp version
@@ -264,8 +264,8 @@ jobs: # Check for new releases first
           
           ## What It Does
           
-          The setup script adds FrankenPHP to your system PATH by modifying `~/.bashrc`. 
-          This makes the following commands available globally:
+          The setup script adds FrankenPHP to your system PATH by modifying `~/.bash_profile`. 
+          This makes the following commands available globally in both interactive and non-interactive shells:
           - `frankenphp` (from bin/frankenphp)
           - `php` (from bin/php)
           - `composer` (from bin/composer)
@@ -278,7 +278,7 @@ jobs: # Check for new releases first
           
           ## Manual Uninstallation
           
-          To uninstall, remove the FrankenPHP section from your `~/.bashrc` file.
+          To uninstall, remove the FrankenPHP section from your `~/.bash_profile` file.
           Look for the section between these markers:
           ```
           # FrankenPHP environment setup
@@ -343,24 +343,30 @@ jobs: # Check for new releases first
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
           
           # Setup configuration
-          BASHRC="$HOME/.bashrc"
+          PROFILE="$HOME/.bash_profile"
           MARKER="# FrankenPHP environment setup"
           
+          # Create .bash_profile if it doesn't exist
+          if [ ! -f "$PROFILE" ]; then
+              echo "Creating $PROFILE"
+              touch "$PROFILE"
+          fi
+          
           # Check if already installed
-          if grep -q "$MARKER" "$BASHRC" 2>/dev/null; then
+          if grep -q "$MARKER" "$PROFILE" 2>/dev/null; then
               echo "============================================"
-              echo "FrankenPHP is already set up in $BASHRC"
+              echo "FrankenPHP is already set up in $PROFILE"
               echo ""
               echo "Installation path: $SCRIPT_DIR"
               echo ""
               echo "To reinstall, first remove the existing setup"
-              echo "from your .bashrc file and run this again."
+              echo "from your .bash_profile file and run this again."
               echo "============================================"
               exit 0
           fi
           
-          # Add to .bashrc
-          cat >> "$BASHRC" << EOL
+          # Add to .bash_profile
+          cat >> "$PROFILE" << EOL
           
           $MARKER
           export PATH="$SCRIPT_DIR/bin:\$PATH"
@@ -371,11 +377,11 @@ jobs: # Check for new releases first
           echo "============================================"
           echo "FrankenPHP installation completed!"
           echo ""
-          echo "Added to: $BASHRC"
+          echo "Added to: $PROFILE"
           echo "Installation path: $SCRIPT_DIR"
           echo ""
           echo "To use FrankenPHP now, run:"
-          echo "  source ~/.bashrc"
+          echo "  source ~/.bash_profile"
           echo ""
           echo "Available commands:"
           echo "  - frankenphp"
@@ -510,8 +516,8 @@ jobs: # Check for new releases first
             ```bash
             tar -xzf frankenphp-linux-amd64-php84.tar.gz
             cd frankenphp-linux-amd64-php84
-            ./setup-env.sh          # Installs permanently
-            source ~/.bashrc        # Apply to current session
+            ./setup-env.sh          # Installs permanently to ~/.bash_profile
+            source ~/.bash_profile  # Apply to current session
             frankenphp version      # Ready to use!
             ```
             
@@ -524,14 +530,16 @@ jobs: # Check for new releases first
             - Composer package manager
             - All required shared libraries
             - Simple one-command installation
+            - Works in both interactive and non-interactive shells (cron, SSH commands)
             - PHP extensions: mbstring, xml, pdo, mysql, zip, gd, curl, openssl, intl, zlib, and more
             
             ## What's New:
+            - Now installs to `~/.bash_profile` for better compatibility with non-interactive shells
             - Added ext-zlib support
             - Simplified setup script (permanent installation only)
-            - Cleaner installation process
+            - Cleaner directory structure (binaries only in bin/)
             
-            To uninstall, manually remove the FrankenPHP section from your ~/.bashrc file.
+            To uninstall, manually remove the FrankenPHP section from your ~/.bash_profile file.
             
             Last updated: $(date)
         env:
