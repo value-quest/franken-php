@@ -1,3 +1,33 @@
+# Create self-contained wrapper scripts for critical binaries
+          # These will work even without environment variables
+          
+          # PHP wrapper with built-in library path
+          mv dist/bin/php dist/bin/php.real
+          cat > dist/bin/php << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export LD_LIBRARY_PATH="$SCRIPT_DIR/../lib:$LD_LIBRARY_PATH"
+          exec "$SCRIPT_DIR/php.real" "$@"
+          EOF
+          chmod +x dist/bin/php
+          
+          # FrankenPHP wrapper with built-in library path
+          mv dist/bin/frankenphp dist/bin/frankenphp.real
+          cat > dist/bin/frankenphp << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export LD_LIBRARY_PATH="$SCRIPT_DIR/../lib:$LD_LIBRARY_PATH"
+          exec "$SCRIPT_DIR/frankenphp.real" "$@"
+          EOF
+          chmod +x dist/bin/frankenphp
+          
+          # Update composer to use wrapped PHP
+          sed -i '1s/.*/#!\/usr\/bin\/env php/' dist/bin/composer      - name: Install Node.js
+        run: |
+          # Install Node.js 20.x (LTS)
+          curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+          sudo apt-get install -y nodejsname: Build FrankenPHP with PHP 8.3 and 8.4
+
 on:
   push:
     branches: [ main ]
@@ -84,6 +114,8 @@ jobs: # Check for new releases first
           # Install Node.js 20.x (LTS)
           curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
           sudo apt-get install -y nodejs
+
+      - name: Get PHP ${{ env.PHP_VERSION }}
 
       - name: Get PHP ${{ env.PHP_VERSION }}
         run: |
@@ -302,6 +334,34 @@ jobs: # Check for new releases first
               echo "Created npm and npx wrapper scripts"
           fi
           
+          # Create self-contained wrapper scripts for critical binaries
+          # These will work even without environment variables
+          
+          # PHP wrapper with built-in library path
+          mv dist/bin/php dist/bin/php.real
+          cat > dist/bin/php << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export LD_LIBRARY_PATH="$SCRIPT_DIR/../lib:$LD_LIBRARY_PATH"
+          exec "$SCRIPT_DIR/php.real" "$@"
+          EOF
+          chmod +x dist/bin/php
+          
+          # FrankenPHP wrapper with built-in library path
+          mv dist/bin/frankenphp dist/bin/frankenphp.real
+          cat > dist/bin/frankenphp << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export LD_LIBRARY_PATH="$SCRIPT_DIR/../lib:$LD_LIBRARY_PATH"
+          exec "$SCRIPT_DIR/frankenphp.real" "$@"
+          EOF
+          chmod +x dist/bin/frankenphp
+          
+          # Update composer to use wrapped PHP
+          sed -i '1s/.*/#!\/usr\/bin\/env php/' dist/bin/composer
+          
+          echo "Created self-contained wrapper scripts"
+          
           echo "Copied PHP binaries and Composer from $PHP_BIN_PATH"
           
           # Verify the binary exists before attempting to copy dependencies
@@ -336,16 +396,67 @@ jobs: # Check for new releases first
           chmod +x dist/bin/frankenphp
           
           # Create index.php with version information
-          cat > dist/index.php << EOF
+          cat > dist/index.php << 'EOF'
           <?php
-          echo "FrankenPHP v${FRANKENPHP_VERSION} with PHP " . PHP_VERSION . "\n";
-          echo "Composer: " . shell_exec(\$_SERVER['PWD'] . "/bin/composer --version") . "\n";
+          // System information
+          echo "=== System Information ===\n";
+          echo "FrankenPHP v${FRANKENPHP_VERSION}\n";
+          echo "PHP Version: " . PHP_VERSION . "\n";
+          echo "Operating System: " . PHP_OS . "\n";
+          echo "Architecture: " . PHP_OS_FAMILY . "\n";
+          echo "\n";
           
-          // Display loaded extensions
-          echo "\nLoaded PHP Extensions:\n";
+          // Composer version
+          echo "=== Package Managers ===\n";
+          echo "Composer: " . trim(shell_exec($_SERVER['PWD'] . "/bin/composer --version")) . "\n";
+          echo "\n";
+          
+          // PHP Extensions
+          echo "=== Loaded PHP Extensions ===\n";
           $extensions = get_loaded_extensions();
           sort($extensions);
-          echo implode(", ", $extensions) . "\n";
+          
+          // Group extensions by category
+          $categories = [
+              'Core' => ['Core', 'ctype', 'date', 'dom', 'fileinfo', 'filter', 'hash', 'libxml', 'mbstring', 'pcre', 'Phar', 'posix', 'readline', 'Reflection', 'session', 'SimpleXML', 'SPL', 'standard', 'tokenizer', 'xml', 'xmlreader', 'xmlwriter'],
+              'Database' => ['mysqli', 'mysqlnd', 'PDO', 'pdo_mysql', 'pdo_sqlite', 'sqlite3'],
+              'Graphics' => ['gd'],
+              'Compression' => ['zip', 'zlib'],
+              'Network' => ['curl', 'openssl', 'sockets'],
+              'Math' => ['bcmath'],
+              'International' => ['intl'],
+              'Other' => ['json', 'xsl']
+          ];
+          
+          $uncategorized = $extensions;
+          
+          foreach ($categories as $category => $catExtensions) {
+              echo "\n{$category}:\n";
+              $found = [];
+              foreach ($catExtensions as $ext) {
+                  if (in_array($ext, $extensions)) {
+                      $found[] = $ext;
+                      $uncategorized = array_diff($uncategorized, [$ext]);
+                  }
+              }
+              if ($found) {
+                  echo "  " . implode(", ", $found) . "\n";
+              } else {
+                  echo "  (none loaded)\n";
+              }
+          }
+          
+          if ($uncategorized) {
+              echo "\nUncategorized:\n";
+              echo "  " . implode(", ", $uncategorized) . "\n";
+          }
+          
+          // Show compile-time configuration
+          echo "\n=== PHP Configuration ===\n";
+          echo "Thread Safety: " . (ZEND_THREAD_SAFE ? "enabled" : "disabled") . "\n";
+          echo "Zend Signal Handling: " . (function_exists('pcntl_signal') ? "enabled" : "disabled") . "\n";
+          echo "Max Execution Timers: " . (defined('ZEND_MAX_EXECUTION_TIMERS') ? "enabled" : "disabled") . "\n";
+          ?>
           EOF
           
           # Create a demo Node.js file
@@ -387,30 +498,54 @@ jobs: # Check for new releases first
           cat > dist/README.md << 'EOF'
           # FrankenPHP Distribution
           
-          ## Installation
+          ## Installation Options
+          
+          ### Option 1: System-wide Installation (Recommended for Servers)
           
           ```bash
-          # Run the setup script to install permanently
+          # Install globally for all users and services
+          sudo ./setup-env.sh
+          
+          # Test installation (works immediately, no source needed)
+          php -v
+          frankenphp version
+          ```
+          
+          This method:
+          - Creates symlinks in `/usr/local/bin`
+          - Configures system library paths
+          - Works with Supervisor, systemd, cron, etc.
+          - No environment setup needed
+          
+          ### Option 2: User Installation
+          
+          ```bash
+          # Install for current user only
           ./setup-env.sh
           
           # Apply changes to current session
           source ~/.bash_profile
           
           # Test installation
-          frankenphp version
           php -v
-          composer --version
-          node --version
-          npm --version
-          git --version
+          frankenphp version
           ```
           
           ## What It Does
           
-          The setup script adds FrankenPHP to your system PATH by modifying `~/.bash_profile`. 
-          It also ensures `.bashrc` is sourced for interactive shells.
+          ### System-wide Installation (with sudo):
+          - Adds library path to `/etc/ld.so.conf.d/frankenphp.conf`
+          - Creates symlinks in `/usr/local/bin`
+          - Works for all users and services immediately
+          - Perfect for production servers
           
-          This makes the following commands available globally in both interactive and non-interactive shells:
+          ### User Installation:
+          - Modifies `~/.bash_profile` with PATH and LD_LIBRARY_PATH
+          - Ensures `.bashrc` is sourced for interactive shells
+          - Good for development environments
+          
+          ## Available Commands
+          
           - `frankenphp` - FrankenPHP web server
           - `php` - PHP runtime
           - `composer` - PHP package manager
@@ -422,23 +557,32 @@ jobs: # Check for new releases first
           - `zip` - File compression tool
           - `unzip` - File extraction tool
           
-          ## Running the Demo Server
+          ## Supervisor Configuration Example
           
-          ### PHP with FrankenPHP
-          ```bash
-          frankenphp run --config Caddyfile
+          With system-wide installation, Supervisor configs work normally:
+          
+          ```ini
+          [program:my-app]
+          command=/usr/local/bin/php /path/to/artisan queue:work
+          directory=/path/to/project
+          autostart=true
+          autorestart=true
           ```
           
-          ### Node.js Demo
+          ## Uninstallation
+          
+          ### System-wide:
           ```bash
-          node demo.js
-          # Server will run on http://localhost:3000
+          # Remove symlinks
+          sudo rm -f /usr/local/bin/{frankenphp,php,composer,node,npm,npx,git,sqlite3,zip,unzip}
+          
+          # Remove library configuration
+          sudo rm -f /etc/ld.so.conf.d/frankenphp.conf
+          sudo ldconfig
           ```
           
-          ## Manual Uninstallation
-          
-          To uninstall, remove the FrankenPHP section from your `~/.bash_profile` file.
-          Look for the section between these markers:
+          ### User Installation:
+          Remove the FrankenPHP section from `~/.bash_profile` between these markers:
           ```
           # FrankenPHP environment setup
           ...
@@ -450,46 +594,77 @@ jobs: # Check for new releases first
           ```
           .
           ├── bin/              # All executables
-          │   ├── frankenphp
-          │   ├── php
-          │   ├── php-config
-          │   ├── phpize
+          │   ├── frankenphp    # Self-contained wrapper
+          │   ├── php           # Self-contained wrapper
           │   ├── composer
           │   ├── node
           │   ├── npm
-          │   ├── npx
-          │   ├── git
-          │   ├── sqlite3
-          │   ├── zip
-          │   └── unzip
+          │   └── ...
           ├── lib/              # Shared libraries
-          │   └── node_modules/ # Node.js modules
-          │       └── npm/
           ├── libexec/          # Git helper programs
-          │   └── git-core/
           ├── setup-env.sh      # Installation script
           ├── Caddyfile         # Example configuration
           ├── index.php         # Demo PHP file
-          ├── demo.js           # Demo Node.js file
-          └── README.md         # This file
+          └── demo.js           # Demo Node.js file
           ```
           
           ## PHP Extensions
           
           This build includes the following PHP extensions:
-          - Core extensions: mbstring, xml, ctype, dom, fileinfo, filter, hash, session, tokenizer
-          - Database: PDO, SQLite3, MySQL/MariaDB
-          - Compression: zip, zlib
-          - Graphics: GD with JPEG, PNG, FreeType support
-          - Networking: curl, openssl
-          - Math: bcmath
-          - Internationalization: intl
+          
+          ### Core Extensions
+          - **ctype** - Character type checking
+          - **dom** - DOM XML manipulation
+          - **fileinfo** - File information
+          - **filter** - Data filtering
+          - **hash** - Hashing functions
+          - **mbstring** - Multibyte string handling
+          - **session** - Session handling
+          - **tokenizer** - PHP tokenizer
+          - **xml** - XML parsing
+          - **libxml** - LibXML support
+          - **SimpleXML** - Simple XML manipulation
+          - **xmlreader** - XML Reader
+          - **xmlwriter** - XML Writer
+          
+          ### Database Extensions
+          - **mysqli** - MySQL Improved Extension
+          - **mysqlnd** - MySQL Native Driver
+          - **pdo** - PHP Data Objects
+          - **pdo_mysql** - PDO driver for MySQL
+          - **pdo_sqlite** - PDO driver for SQLite
+          - **sqlite3** - SQLite version 3 support
+          
+          ### Graphics & Images
+          - **gd** - Image processing (with JPEG, PNG, WebP, FreeType support)
+          
+          ### Compression
+          - **zlib** - Zlib compression
+          - **zip** - ZIP archive support
+          
+          ### Network & Communication
+          - **curl** - cURL library support
+          - **openssl** - OpenSSL support
+          - **sockets** - Socket communication
+          
+          ### Math & Numbers
+          - **bcmath** - Arbitrary precision mathematics
+          
+          ### Internationalization
+          - **intl** - Internationalization functions
+          
+          ### Other Extensions
+          - **json** - JSON support
+          - **pcre** - Perl Compatible Regular Expressions
+          - **posix** - POSIX functions
+          - **readline** - GNU Readline support
+          - **xsl** - XSL transformations
           
           ## Development Tools
           
-          - **Node.js 20.x LTS** with npm and npx for JavaScript/TypeScript development
+          - **Node.js 20.x LTS** with npm and npx
           - **Git** for version control
-          - **zip/unzip** for file compression and extraction
+          - **zip/unzip** for file compression
           - **SQLite3** for database operations
           EOF
           
@@ -525,59 +700,100 @@ jobs: # Check for new releases first
           BASHRC="$HOME/.bashrc"
           MARKER="# FrankenPHP environment setup"
           
-          # Create .bash_profile if it doesn't exist
-          if [ ! -f "$PROFILE" ]; then
-              echo "Creating $PROFILE"
-              touch "$PROFILE"
-          fi
+          # Create system-wide configuration for library path
+          LDCONFIG_FILE="/etc/ld.so.conf.d/frankenphp.conf"
           
-          # Check if .bash_profile sources .bashrc (for interactive shells)
-          if ! grep -q "source.*\.bashrc\|\..*\.bashrc" "$PROFILE" 2>/dev/null; then
-              echo "Adding .bashrc sourcing to .bash_profile"
-              cat >> "$PROFILE" << 'EOL'
+          echo "============================================"
+          echo "FrankenPHP Installation"
+          echo "============================================"
+          
+          # Check if running with sudo
+          if [ "$EUID" -eq 0 ]; then
+              echo "Running with root privileges - installing system-wide"
+              
+              # Create system-wide library configuration
+              echo "$SCRIPT_DIR/lib" > "$LDCONFIG_FILE"
+              ldconfig
+              echo "Added library path to system configuration"
+              
+              # Create symlinks in system bin directory
+              for binary in frankenphp php composer node npm npx git sqlite3 zip unzip; do
+                  if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
+                      ln -sf "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
+                      echo "Created symlink: /usr/local/bin/$binary"
+                  fi
+              done
+              
+              echo ""
+              echo "System-wide installation completed!"
+              echo "All users can now use the tools without environment setup."
+              echo "This includes non-interactive processes like Supervisor."
+          else
+              echo "Running without root privileges - installing for current user only"
+              
+              # Create .bash_profile if it doesn't exist
+              if [ ! -f "$PROFILE" ]; then
+                  echo "Creating $PROFILE"
+                  touch "$PROFILE"
+              fi
+              
+              # Check if .bash_profile sources .bashrc (for interactive shells)
+              if ! grep -q "source.*\.bashrc\|\..*\.bashrc" "$PROFILE" 2>/dev/null; then
+                  echo "Adding .bashrc sourcing to .bash_profile"
+                  cat >> "$PROFILE" << 'EOL'
           
           # Source .bashrc for interactive shells
           if [ -f ~/.bashrc ]; then
               . ~/.bashrc
           fi
           EOL
-          fi
-          
-          # Check if already installed
-          if grep -q "$MARKER" "$PROFILE" 2>/dev/null; then
-              echo "============================================"
-              echo "FrankenPHP is already set up in $PROFILE"
-              echo ""
-              echo "Installation path: $SCRIPT_DIR"
-              echo ""
-              echo "To reinstall, first remove the existing setup"
-              echo "from your .bash_profile file and run this again."
-              echo "============================================"
-              exit 0
-          fi
-          
-          # Add to .bash_profile
-          cat >> "$PROFILE" << EOL
+              fi
+              
+              # Check if already installed
+              if grep -q "$MARKER" "$PROFILE" 2>/dev/null; then
+                  echo ""
+                  echo "FrankenPHP is already set up in $PROFILE"
+                  echo "Installation path: $SCRIPT_DIR"
+                  echo ""
+                  echo "To reinstall, first remove the existing setup"
+                  echo "from your .bash_profile file and run this again."
+              else
+                  # Add to .bash_profile
+                  cat >> "$PROFILE" << EOL
           
           $MARKER
           export PATH="$SCRIPT_DIR/bin:\$PATH"
           export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:\$LD_LIBRARY_PATH"
           # End of FrankenPHP environment setup
           EOL
+                  
+                  echo ""
+                  echo "User installation completed!"
+                  echo "Added to: $PROFILE"
+                  echo ""
+                  echo "To use FrankenPHP now, run:"
+                  echo "  source ~/.bash_profile"
+              fi
+              
+              echo ""
+              echo "For system-wide installation (recommended for servers):"
+              echo "  sudo $0"
+              echo ""
+              echo "This will make the tools available for all users and services"
+              echo "like Supervisor, systemd, cron, etc."
+          fi
           
-          echo "============================================"
-          echo "FrankenPHP installation completed!"
-          echo ""
-          echo "Added to: $PROFILE"
-          echo "Installation path: $SCRIPT_DIR"
-          echo ""
-          echo "To use FrankenPHP now, run:"
-          echo "  source ~/.bash_profile"
           echo ""
           echo "Available commands:"
           echo "  - frankenphp"
           echo "  - php"
           echo "  - composer"
+          echo "  - node"
+          echo "  - npm"
+          echo "  - git"
+          echo "  - sqlite3"
+          echo "  - zip"
+          echo "  - unzip"
           echo "============================================"
           EOF
           chmod +x dist/setup-env.sh
@@ -704,52 +920,77 @@ jobs: # Check for new releases first
             
             ## Quick Installation
             
+            ### For Production Servers (System-wide):
             ```bash
             tar -xzf frankenphp-linux-amd64-php84.tar.gz
             cd frankenphp-linux-amd64-php84
-            ./setup-env.sh          # Installs permanently to ~/.bash_profile
+            sudo ./setup-env.sh     # Installs globally
+            php -v                  # Works immediately!
+            ```
+            
+            ### For Development (User-only):
+            ```bash
+            tar -xzf frankenphp-linux-amd64-php84.tar.gz
+            cd frankenphp-linux-amd64-php84
+            ./setup-env.sh          # Installs for current user
             source ~/.bash_profile  # Apply to current session
-            frankenphp version      # Ready to use!
+            php -v                  # Ready to use!
             ```
             
             ## Available Downloads:
             - **PHP 8.3**: `frankenphp-linux-amd64-php83.tar.gz`
             - **PHP 8.4**: `frankenphp-linux-amd64-php84.tar.gz`
             
-            ## Features:
-            - FrankenPHP binary with PHP runtime including ext-zlib
+            ## Key Features:
+            - **NEW: System-wide installation option** - Works with Supervisor, systemd, cron
+            - Self-contained binaries with built-in library paths
+            - FrankenPHP with PHP runtime including ext-zlib
             - Composer package manager
             - Node.js 20.x LTS with npm and npx
             - Git version control system
-            - SQLite3 command-line tool
-            - zip/unzip utilities
+            - SQLite3, zip/unzip utilities
             - All required shared libraries
-            - Simple one-command installation
-            - Works in both interactive and non-interactive shells
-            - PHP extensions: mbstring, xml, pdo, mysql, zip, gd, curl, openssl, intl, zlib, and more
             
             ## What's New:
-            - Added Git version control system
-            - Added zip and unzip utilities
-            - Enhanced Node.js integration with proper wrapper scripts
-            - Improved git integration with helper programs
+            - **System-wide installation support** with `sudo ./setup-env.sh`
+            - **Self-contained wrapper scripts** - PHP and FrankenPHP work without environment variables
+            - Improved compatibility with process managers (Supervisor, systemd)
+            - Enhanced library path handling
             
             ## Complete Toolset:
             - `frankenphp` - High-performance PHP web server
-            - `php` - PHP 8.3/8.4 runtime
+            - `php` - PHP 8.3/8.4 runtime (works with Supervisor!)
             - `composer` - PHP dependency manager
             - `node` - Node.js runtime
             - `npm` - Node.js package manager
             - `npx` - Node.js package executor
             - `git` - Version control
             - `sqlite3` - SQLite database CLI
-            - `zip` - Create compressed archives
-            - `unzip` - Extract compressed archives
+            - `zip` / `unzip` - Archive utilities
             
-            This distribution provides a complete web development environment with PHP, Node.js, and essential tools.
+            ## PHP Extensions Included:
+            - **Core**: ctype, dom, fileinfo, filter, hash, mbstring, session, tokenizer, xml
+            - **Database**: mysqli, mysqlnd, pdo, pdo_mysql, pdo_sqlite, sqlite3
+            - **Graphics**: gd (with JPEG, PNG, FreeType support)
+            - **Compression**: zlib, zip
+            - **Network**: curl, openssl
+            - **Math**: bcmath
+            - **International**: intl
+            - **Template**: xsl
             
-            To uninstall, manually remove the FrankenPHP section from your ~/.bash_profile file.
+            ## Installation Methods:
             
-            Last updated: $(date)
+            1. **System-wide (Recommended for servers)**:
+               - Run with `sudo`
+               - Creates symlinks in `/usr/local/bin`
+               - Configures system library paths
+               - Works with all users and services
+            
+            2. **User-only (For development)**:
+               - Run without `sudo`
+               - Modifies `~/.bash_profile`
+               - Requires sourcing profile
+               
+            This distribution provides a complete web development environment that works seamlessly with process managers.
         env:
           GITHUB_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
