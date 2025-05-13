@@ -266,9 +266,9 @@ jobs: # Check for new releases first
           
           The setup script adds FrankenPHP to your system PATH by modifying `~/.bashrc`. 
           This makes the following commands available globally:
-          - `frankenphp`
-          - `php`
-          - `composer`
+          - `frankenphp` (from bin/frankenphp)
+          - `php` (from bin/php)
+          - `composer` (from bin/composer)
           
           ## Running the Demo Server
           
@@ -286,13 +286,22 @@ jobs: # Check for new releases first
           # End of FrankenPHP environment setup
           ```
           
-          ## Contents
+          ## Directory Structure
           
-          - `bin/` - Binary executables
-          - `lib/` - Shared libraries  
-          - `setup-env.sh` - Installation script
-          - `Caddyfile` - Example configuration
-          - `index.php` - Demo PHP file
+          ```
+          .
+          ├── bin/              # All executables
+          │   ├── frankenphp
+          │   ├── php
+          │   ├── php-config
+          │   ├── phpize
+          │   └── composer
+          ├── lib/              # Shared libraries
+          ├── setup-env.sh      # Installation script
+          ├── Caddyfile         # Example configuration
+          ├── index.php         # Demo PHP file
+          └── README.md         # This file
+          ```
           
           ## PHP Extensions
           
@@ -375,36 +384,6 @@ jobs: # Check for new releases first
           echo "============================================"
           EOF
           chmod +x dist/setup-env.sh
-        
-          # Create wrapper scripts that automatically set up the environment
-          echo "Creating wrapper scripts..."
-          
-          # FrankenPHP wrapper
-          cat > dist/frankenphp << 'EOF'
-          #!/bin/bash
-          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-          export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
-          exec "$SCRIPT_DIR/bin/frankenphp" "$@"
-          EOF
-          chmod +x dist/frankenphp
-          
-          # PHP wrapper
-          cat > dist/php << 'EOF'
-          #!/bin/bash
-          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-          export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
-          exec "$SCRIPT_DIR/bin/php" "$@"
-          EOF
-          chmod +x dist/php
-          
-          # Composer wrapper
-          cat > dist/composer << 'EOF'
-          #!/bin/bash
-          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-          export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
-          exec "$SCRIPT_DIR/bin/php" "$SCRIPT_DIR/bin/composer" "$@"
-          EOF
-          chmod +x dist/composer
         
           # Create archive
           cd dist
