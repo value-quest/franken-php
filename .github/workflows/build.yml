@@ -121,7 +121,8 @@ jobs:
             --with-jpeg \
             --enable-intl \
             --with-sqlite3 \
-            --with-zlib
+            --with-zlib \
+            --enable-pcntl
           make -j$(nproc)
           sudo make install
           sudo ldconfig
@@ -331,7 +332,10 @@ jobs:
           - Git, sqlite3, zip/unzip
           
           ## PHP Extensions
-          Core, DOM, MB, XML, PDO, MySQL, SQLite, GD, Zlib, Curl, OpenSSL, BCMath, Intl, and more.
+          Core, DOM, MB, XML, PDO, MySQL, SQLite, GD, Zlib, Curl, OpenSSL, BCMath, Intl, PCNTL, and more.
+          
+          ## Laravel Octane Support
+          Includes ext-pcntl required for Laravel Octane process management.
           EOF
           
           # Create archive
@@ -429,6 +433,7 @@ jobs:
             - Node.js 20.x LTS, npm, npx
             - Git, sqlite3, zip/unzip
             - Self-contained binaries (work with Supervisor!)
+            - ext-pcntl for Laravel Octane support
             
             ## Two Install Methods
             1. **System-wide** (`sudo`): Creates `/usr/local/bin` symlinks, works everywhere
