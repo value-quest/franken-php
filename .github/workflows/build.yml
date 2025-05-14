@@ -6,11 +6,10 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
-  # Allow manual triggering
   schedule:
     - cron: '0 0 * * *'  # Run daily at midnight to check for new FrankenPHP releases
 
-jobs: # Check for new releases first
+jobs:
   check-new-release:
     runs-on: ubuntu-latest
     outputs:
@@ -43,12 +42,12 @@ jobs: # Check for new releases first
             echo "has_new_version=false" >> $GITHUB_OUTPUT
           fi
 
-  # Build FrankenPHP for multiple PHP versions
   build-php:
     needs: check-new-release
-    # Always run for manual dispatch or push to main
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'pull_request' || needs.check-new-release.outputs.has_new_version == 'true' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     strategy:
       matrix:
         php:
@@ -78,12 +77,10 @@ jobs: # Check for new releases first
         uses: actions/setup-go@v4
         with:
           go-version: '1.24'
-          # Disable cache since we don't have a go.sum file in the root
           cache: false
 
       - name: Install Node.js
         run: |
-          # Install Node.js 20.x (LTS)
           curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
           sudo apt-get install -y nodejs
 
@@ -136,14 +133,12 @@ jobs: # Check for new releases first
       - name: Build FrankenPHP with rpath
         working-directory: frankenphp-${{ env.FRANKENPHP_VERSION }}/caddy/frankenphp
         run: |
-          # Build with rpath set to both relative and absolute paths
           CGO_CFLAGS=$(php-config --includes) \
           CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs) -Wl,-rpath,\$ORIGIN/../lib -Wl,-rpath,/opt/frankenphp/lib" \
           go build -tags=nobadger,nomysql,nopgx,nowatcher
 
       - name: Download Composer
         run: |
-          # Download and verify Composer installer
           php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
           EXPECTED_CHECKSUM="$(php -r 'copy("https://composer.github.io/installer.sig", "php://stdout");')"
           ACTUAL_CHECKSUM="$(php -r "echo hash_file('sha384', 'composer-setup.php');")"
@@ -154,7 +149,6 @@ jobs: # Check for new releases first
             exit 1
           fi
           
-          # Install Composer
           php composer-setup.php --quiet
           rm composer-setup.php
 
@@ -164,11 +158,7 @@ jobs: # Check for new releases first
           mkdir -p dist/lib
           mkdir -p dist/bin
           
-          # Debug: Check if libphp.so exists and its location
-          find /usr -name "libphp.so" || echo "libphp.so not found in /usr"
-          php-config --prefix || echo "php-config --prefix failed"
-          
-          # Copy PHP shared library (with error checking)
+          # Copy PHP shared library
           PHP_LIB_PATH="$(php-config --prefix)/lib/libphp.so"
           if [ -f "$PHP_LIB_PATH" ]; then
             cp "$PHP_LIB_PATH" dist/lib/
@@ -184,163 +174,75 @@ jobs: # Check for new releases first
           cp "$PHP_BIN_PATH/php" dist/bin/
           cp "$PHP_BIN_PATH/php-config" dist/bin/
           cp "$PHP_BIN_PATH/phpize" dist/bin/
-          # Copy Composer
           cp composer.phar dist/bin/composer
           chmod +x dist/bin/composer
           
-          # Copy sqlite3 binary if available
-          if command -v sqlite3 &> /dev/null; then
-              cp $(which sqlite3) dist/bin/
-              echo "Copied sqlite3 binary"
-          else
-              echo "sqlite3 binary not found in system"
-          fi
+          # Copy sqlite3, zip, unzip
+          for tool in sqlite3 zip unzip; do
+            if command -v $tool &> /dev/null; then
+              cp $(which $tool) dist/bin/
+              echo "Copied $tool"
+            fi
+          done
           
-          # Copy zip and unzip if available
-          if command -v zip &> /dev/null; then
-              cp $(which zip) dist/bin/
-              echo "Copied zip binary"
-          fi
-          
-          if command -v unzip &> /dev/null; then
-              cp $(which unzip) dist/bin/
-              echo "Copied unzip binary"
-          fi
-          
-          # Copy git and its dependencies
+          # Copy git and helpers
           if command -v git &> /dev/null; then
-              # Copy git binary
-              cp $(which git) dist/bin/
-              echo "Copied git binary"
-              
-              # Git needs several helper programs, let's copy the essential ones
-              GIT_EXEC_PATH=$(git --exec-path)
-              if [ -d "$GIT_EXEC_PATH" ]; then
-                  mkdir -p dist/libexec/git-core
-                  # Copy ALL git helper programs
-                  cp -r "$GIT_EXEC_PATH"/* dist/libexec/git-core/
-                  echo "Copied git helper programs"
-                  
-                  # Create a wrapper for git to set GIT_EXEC_PATH
-                  mv dist/bin/git dist/bin/git.real
-                  cat > dist/bin/git << 'EOF'
+            cp $(which git) dist/bin/
+            GIT_EXEC_PATH=$(git --exec-path)
+            if [ -d "$GIT_EXEC_PATH" ]; then
+              mkdir -p dist/libexec/git-core
+              cp -r "$GIT_EXEC_PATH"/* dist/libexec/git-core/
+              mv dist/bin/git dist/bin/git.real
+              cat > dist/bin/git << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
           export GIT_EXEC_PATH="$SCRIPT_DIR/../libexec/git-core"
-          export GIT_TEMPLATE_DIR="$SCRIPT_DIR/../share/git-core/templates"
           exec "$SCRIPT_DIR/git.real" "$@"
           EOF
-                  chmod +x dist/bin/git
-                  echo "Created git wrapper script"
-                  
-                  # Copy git templates if they exist
-                  GIT_TEMPLATE_DIR="/usr/share/git-core/templates"
-                  if [ -d "$GIT_TEMPLATE_DIR" ]; then
-                      mkdir -p dist/share/git-core
-                      cp -r "$GIT_TEMPLATE_DIR" dist/share/git-core/
-                      echo "Copied git templates"
-                  fi
-              fi
-              
-              # Copy git dependencies libraries
-              for lib in $(ldd $(which git) | grep "=> /" | awk '{print $3}'); do
-                  if [[ ! "$lib" =~ libc.so|ld-linux ]]; then
-                      cp "$lib" dist/lib/ 2>/dev/null || true
-                  fi
-              done
+              chmod +x dist/bin/git
+            fi
           fi
-          
-          echo "Copied PHP binaries and Composer from $PHP_BIN_PATH"
-          
-          # Verify the binary exists before attempting to copy dependencies
-          if [ ! -f "frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp" ]; then
-            echo "ERROR: FrankenPHP binary not found!"
-            find frankenphp-${FRANKENPHP_VERSION} -name "frankenphp"
-            exit 1
-          fi
-          
-          # Copy all required shared libraries
-          echo "Copying shared library dependencies..."
-          # Copy libraries required by FrankenPHP
-          ldd frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
-          
-          # Copy libraries required by PHP binary
-          echo "Copying PHP binary dependencies..."
-          ldd "$PHP_BIN_PATH/php" | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
-          
-          # Copy libraries required by libphp.so
-          echo "Copying libphp.so dependencies..."
-          ldd "$PHP_LIB_PATH" | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
-          
-          # Copy additional libraries that might be needed (common PHP dependencies)
-          echo "Copying additional common libraries..."
-          for lib in libzip.so* libpng16.so* libjpeg.so* libfreetype.so* libicu*.so* libonig.so* libxml2.so* libxslt.so* libgd.so* libssl.so* libcrypto.so* libcurl.so* libmariadb.so* libmysqlclient.so*; do
-            find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/local/lib -name "$lib" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
-          done
-          
-          # Copy the FrankenPHP binary
-          echo "Copying FrankenPHP binary..."
-          cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/bin/frankenphp
-          chmod +x dist/bin/frankenphp
           
           # Copy Node.js and npm
           if command -v node &> /dev/null; then
-              # Copy node binary
-              cp $(which node) dist/bin/
-              echo "Copied node binary"
-              
-              # Copy npm, npx and related files
-              NPM_PREFIX=$(npm config get prefix)
-              NODE_VERSION=$(node --version)
-              
-              # Create necessary directories
-              mkdir -p dist/lib/node_modules
-              
-              # Copy npm module
-              if [ -d "$NPM_PREFIX/lib/node_modules/npm" ]; then
-                  cp -r "$NPM_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
-                  echo "Copied npm module"
-              fi
-              
-              # Copy npm and npx executables
-              if [ -f "$NPM_PREFIX/bin/npm" ]; then
-                  cp "$NPM_PREFIX/bin/npm" dist/bin/
-                  chmod +x dist/bin/npm
-                  echo "Copied npm executable"
-              fi
-              
-              if [ -f "$NPM_PREFIX/bin/npx" ]; then
-                  cp "$NPM_PREFIX/bin/npx" dist/bin/
-                  chmod +x dist/bin/npx
-                  echo "Copied npx executable"
-              fi
-              
-              # Create wrapper scripts that set NODE_PATH
-              cat > dist/bin/npm-wrapper << 'EOF'
+            cp $(which node) dist/bin/
+            NPM_PREFIX=$(npm config get prefix)
+            mkdir -p dist/lib/node_modules
+            if [ -d "$NPM_PREFIX/lib/node_modules/npm" ]; then
+              cp -r "$NPM_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
+            fi
+            cat > dist/bin/npm << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
           export NODE_PATH="$SCRIPT_DIR/../lib/node_modules"
           exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npm-cli.js" "$@"
           EOF
-              chmod +x dist/bin/npm-wrapper
-              mv dist/bin/npm-wrapper dist/bin/npm
-              
-              cat > dist/bin/npx-wrapper << 'EOF'
+            chmod +x dist/bin/npm
+            cat > dist/bin/npx << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
           export NODE_PATH="$SCRIPT_DIR/../lib/node_modules"
           exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npx-cli.js" "$@"
           EOF
-              chmod +x dist/bin/npx-wrapper
-              mv dist/bin/npx-wrapper dist/bin/npx
-              
-              echo "Created npm and npx wrapper scripts"
+            chmod +x dist/bin/npx
           fi
           
-          # Create self-contained wrapper scripts for critical binaries
-          # These will work even without environment variables
+          # Copy FrankenPHP binary
+          cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/bin/frankenphp
+          chmod +x dist/bin/frankenphp
           
-          # PHP wrapper with built-in library path
+          # Copy all required shared libraries
+          echo "Copying shared library dependencies..."
+          for binary in frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp "$PHP_BIN_PATH/php" "$PHP_LIB_PATH"; do
+            ldd "$binary" | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
+          done
+          
+          # Copy additional common libraries
+          for lib in libzip.so* libpng16.so* libjpeg.so* libfreetype.so* libicu*.so* libonig.so* libxml2.so* libxslt.so* libgd.so* libssl.so* libcrypto.so* libcurl.so* libmariadb.so*; do
+            find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/local/lib -name "$lib" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
+          done
+          
+          # Create self-contained wrapper scripts
           mv dist/bin/php dist/bin/php.real
           cat > dist/bin/php << 'EOF'
           #!/bin/bash
@@ -350,7 +252,6 @@ jobs: # Check for new releases first
           EOF
           chmod +x dist/bin/php
           
-          # FrankenPHP wrapper with built-in library path
           mv dist/bin/frankenphp dist/bin/frankenphp.real
           cat > dist/bin/frankenphp << 'EOF'
           #!/bin/bash
@@ -360,130 +261,37 @@ jobs: # Check for new releases first
           EOF
           chmod +x dist/bin/frankenphp
           
-          # Update composer to use wrapped PHP
-          sed -i '1s/.*/#!\/usr\/bin\/env php/' dist/bin/composer
-          
-          echo "Created self-contained wrapper scripts"
-          
-          # Create index.php with version information
-          cat > dist/index.php << 'EOF'
+          # Create index.php
+          cat > dist/index.php << EOF
           <?php
-          echo "FrankenPHP v${FRANKENPHP_VERSION} with PHP " . PHP_VERSION . "\n";
-          echo "Composer: " . trim(shell_exec($_SERVER['PWD'] . "/bin/composer --version")) . "\n\n";
-          
-          echo "PHP Extensions:\n";
-          $extensions = get_loaded_extensions();
-          sort($extensions);
-          echo implode(", ", $extensions) . "\n";
+          echo "FrankenPHP v${FRANKENPHP_VERSION} with PHP " . PHP_VERSION . "\\n";
+          echo "Composer: " . trim(shell_exec(\$_SERVER['PWD'] . "/bin/composer --version")) . "\\n\\n";
+          echo "PHP Extensions:\\n";
+          \$extensions = get_loaded_extensions();
+          sort(\$extensions);
+          echo implode(", ", \$extensions) . "\\n";
           ?>
           EOF
           
-          # Create a demo Node.js file
-          cat > dist/demo.js << 'EOF'
-          console.log("Node.js version:", process.version);
-          console.log("NPM location:", process.env.npm_execpath || "Not running via npm");
-          console.log("Current directory:", process.cwd());
-          
-          // Simple HTTP server demo
-          const http = require('http');
-          const server = http.createServer((req, res) => {
-            res.writeHead(200, { 'Content-Type': 'text/plain' });
-            res.end('Hello from Node.js!\n');
-          });
-          
-          const port = 3000;
-          server.listen(port, () => {
-            console.log(`Node.js server running at http://localhost:${port}/`);
-          });
-          EOF
-          
-          # Create a Caddyfile to serve the index.php on localhost:8000
-          cat > dist/Caddyfile << EOF
-          { 
-            auto_https off
-            http_port 8000
-            https_port 0
-            frankenphp
-          }
-        
-          localhost:8000 {
-            root * .
-            encode gzip
-            php_server 
-          }
-          EOF
-      
-          # Create wrapper script to add bin to PATH
+          # Create setup script
           cat > dist/setup-env.sh << 'EOF'
           #!/bin/bash
-          
-          # Get the directory where this script is located
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
-          
-          # Setup configuration
           PROFILE="$HOME/.bash_profile"
-          BASHRC="$HOME/.bashrc"
           MARKER="# FrankenPHP environment setup"
           
-          # Create system-wide configuration for library path
-          LDCONFIG_FILE="/etc/ld.so.conf.d/frankenphp.conf"
-          
-          echo "============================================"
-          echo "FrankenPHP Installation"
-          echo "============================================"
-          
-          # Check if running with sudo
           if [ "$EUID" -eq 0 ]; then
-              echo "Running with root privileges - installing system-wide"
-              
-              # Create system-wide library configuration
-              echo "$SCRIPT_DIR/lib" > "$LDCONFIG_FILE"
+              echo "Installing system-wide..."
+              echo "$SCRIPT_DIR/lib" > /etc/ld.so.conf.d/frankenphp.conf
               ldconfig
-              echo "Added library path to system configuration"
-              
-              # Create symlinks in system bin directory
               for binary in frankenphp php composer node npm npx git sqlite3 zip unzip; do
                   if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
                       ln -sf "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
-                      echo "Created symlink: /usr/local/bin/$binary"
                   fi
               done
-              
-              echo ""
               echo "System-wide installation completed!"
-              echo "All users can now use the tools without environment setup."
-              echo "This includes non-interactive processes like Supervisor."
           else
-              echo "Running without root privileges - installing for current user only"
-              
-              # Create .bash_profile if it doesn't exist
-              if [ ! -f "$PROFILE" ]; then
-                  echo "Creating $PROFILE"
-                  touch "$PROFILE"
-              fi
-              
-              # Check if .bash_profile sources .bashrc (for interactive shells)
-              if ! grep -q "source.*\.bashrc\|\..*\.bashrc" "$PROFILE" 2>/dev/null; then
-                  echo "Adding .bashrc sourcing to .bash_profile"
-                  cat >> "$PROFILE" << 'EOL'
-          
-          # Source .bashrc for interactive shells
-          if [ -f ~/.bashrc ]; then
-              . ~/.bashrc
-          fi
-          EOL
-              fi
-              
-              # Check if already installed
-              if grep -q "$MARKER" "$PROFILE" 2>/dev/null; then
-                  echo ""
-                  echo "FrankenPHP is already set up in $PROFILE"
-                  echo "Installation path: $SCRIPT_DIR"
-                  echo ""
-                  echo "To reinstall, first remove the existing setup"
-                  echo "from your .bash_profile file and run this again."
-              else
-                  # Add to .bash_profile
+              if ! grep -q "$MARKER" "$PROFILE" 2>/dev/null; then
                   cat >> "$PROFILE" << EOL
           
           $MARKER
@@ -491,201 +299,140 @@ jobs: # Check for new releases first
           export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:\$LD_LIBRARY_PATH"
           # End of FrankenPHP environment setup
           EOL
-                  
-                  echo ""
-                  echo "User installation completed!"
-                  echo "Added to: $PROFILE"
-                  echo ""
-                  echo "To use FrankenPHP now, run:"
-                  echo "  source ~/.bash_profile"
+                  echo "User installation completed! Run: source ~/.bash_profile"
+              else
+                  echo "Already installed in $PROFILE"
               fi
-              
-              echo ""
-              echo "For system-wide installation (recommended for servers):"
-              echo "  sudo $0"
-              echo ""
-              echo "This will make the tools available for all users and services"
-              echo "like Supervisor, systemd, cron, etc."
           fi
-          
-          echo ""
-          echo "Available commands:"
-          echo "  - frankenphp"
-          echo "  - php"
-          echo "  - composer"
-          echo "  - node"
-          echo "  - npm"
-          echo "  - git"
-          echo "  - sqlite3"
-          echo "  - zip"
-          echo "  - unzip"
-          echo "============================================"
           EOF
           chmod +x dist/setup-env.sh
           
-          # Create README file
+          # Create README
           cat > dist/README.md << 'EOF'
           # FrankenPHP Distribution
           
-          ## Installation Options
+          ## Installation
           
-          ### Option 1: System-wide Installation (Recommended for Servers)
-          
+          ### System-wide (recommended for servers)
           ```bash
-          # Install globally for all users and services
           sudo ./setup-env.sh
-          
-          # Test installation (works immediately, no source needed)
-          php -v
-          frankenphp version
           ```
           
-          This method:
-          - Creates symlinks in `/usr/local/bin`
-          - Configures system library paths
-          - Works with Supervisor, systemd, cron, etc.
-          - No environment setup needed
-          
-          ### Option 2: User Installation
-          
+          ### User-only
           ```bash
-          # Install for current user only
           ./setup-env.sh
-          
-          # Apply changes to current session
           source ~/.bash_profile
-          
-          # Test installation
-          php -v
-          frankenphp version
           ```
           
-          ## What It Does
-          
-          ### System-wide Installation (with sudo):
-          - Adds library path to `/etc/ld.so.conf.d/frankenphp.conf`
-          - Creates symlinks in `/usr/local/bin`
-          - Works for all users and services immediately
-          - Perfect for production servers
-          
-          ### User Installation:
-          - Modifies `~/.bash_profile` with PATH and LD_LIBRARY_PATH
-          - Ensures `.bashrc` is sourced for interactive shells
-          - Good for development environments
-          
-          ## Available Commands
-          
-          - `frankenphp` - FrankenPHP web server
-          - `php` - PHP runtime
-          - `composer` - PHP package manager
-          - `node` - Node.js runtime
-          - `npm` - Node.js package manager
-          - `npx` - Node.js package executor
-          - `git` - Version control system
-          - `sqlite3` - SQLite database tool
-          - `zip` - File compression tool
-          - `unzip` - File extraction tool
-          
-          ## Supervisor Configuration Example
-          
-          With system-wide installation, Supervisor configs work normally:
-          
-          ```ini
-          [program:my-app]
-          command=/usr/local/bin/php /path/to/artisan queue:work
-          directory=/path/to/project
-          autostart=true
-          autorestart=true
-          ```
-          
-          ## Uninstallation
-          
-          ### System-wide:
-          ```bash
-          # Remove symlinks
-          sudo rm -f /usr/local/bin/{frankenphp,php,composer,node,npm,npx,git,sqlite3,zip,unzip}
-          
-          # Remove library configuration
-          sudo rm -f /etc/ld.so.conf.d/frankenphp.conf
-          sudo ldconfig
-          ```
-          
-          ### User Installation:
-          Remove the FrankenPHP section from `~/.bash_profile` between these markers:
-          ```
-          # FrankenPHP environment setup
-          ...
-          # End of FrankenPHP environment setup
-          ```
-          
-          ## Directory Structure
-          
-          ```
-          .
-          ├── bin/              # All executables
-          │   ├── frankenphp    # Self-contained wrapper
-          │   ├── php           # Self-contained wrapper
-          │   ├── composer
-          │   ├── node
-          │   ├── npm
-          │   └── ...
-          ├── lib/              # Shared libraries
-          ├── libexec/          # Git helper programs
-          ├── setup-env.sh      # Installation script
-          ├── Caddyfile         # Example configuration
-          ├── index.php         # Demo PHP file
-          ├── demo.js           # Demo Node.js file
-          └── README.md         # This file
-          ```
+          ## Included Tools
+          - FrankenPHP, PHP 8.x, Composer
+          - Node.js 20.x LTS, npm, npx
+          - Git, sqlite3, zip/unzip
           
           ## PHP Extensions
+          Core, DOM, MB, XML, PDO, MySQL, SQLite, GD, Zlib, Curl, OpenSSL, BCMath, Intl, and more.
+          EOF
           
-          This build includes the following PHP extensions:
+          # Create archive
+          cd dist
+          tar -czf ../frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz .
+          cd ..
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frankenphp-${{ env.PHP_SHORT }}
+          path: frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz
+          retention-days: 7
+
+  create-release:
+    needs: [check-new-release, build-php]
+    if: ${{ always() && needs.build-php.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    env:
+      FRANKENPHP_VERSION: ${{ needs.check-new-release.outputs.latest_version }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts/
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release-files
+          find release-artifacts -name "*.tar.gz" -exec mv {} release-files/ \;
+          echo "Files to be released:"
+          ls -la release-files/
+
+      - name: Check for existing release tag
+        id: check-tag
+        run: |
+          STABLE_TAG="v${{ env.FRANKENPHP_VERSION }}"
+          echo "stable_tag=$STABLE_TAG" >> $GITHUB_OUTPUT
           
-          ### Core Extensions
-          - **ctype** - Character type checking
-          - **dom** - DOM XML manipulation
-          - **fileinfo** - File information
-          - **filter** - Data filtering
-          - **hash** - Hashing functions
-          - **mbstring** - Multibyte string handling
-          - **session** - Session handling
-          - **tokenizer** - PHP tokenizer
-          - **xml** - XML parsing
-          - **libxml** - LibXML support
-          - **SimpleXML** - Simple XML manipulation
-          - **xmlreader** - XML Reader
-          - **xmlwriter** - XML Writer
+          if git ls-remote --tags origin refs/tags/$STABLE_TAG | grep -q $STABLE_TAG; then
+            echo "tag_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "tag_exists=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Delete existing release
+        if: steps.check-tag.outputs.tag_exists == 'true'
+        run: |
+          STABLE_TAG="${{ steps.check-tag.outputs.stable_tag }}"
           
-          ### Database Extensions
-          - **mysqli** - MySQL Improved Extension
-          - **mysqlnd** - MySQL Native Driver
-          - **pdo** - PHP Data Objects
-          - **pdo_mysql** - PDO driver for MySQL
-          - **pdo_sqlite** - PDO driver for SQLite
-          - **sqlite3** - SQLite version 3 support
+          RELEASE_ID=$(curl -s -H "Authorization: token ${{ secrets.ORG_RELEASE_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$STABLE_TAG" | \
+            jq -r '.id')
           
-          ### Graphics & Images
-          - **gd** - Image processing (with JPEG, PNG, WebP, FreeType support)
+          if [ "$RELEASE_ID" != "null" ]; then
+            curl -s -X DELETE -H "Authorization: token ${{ secrets.ORG_RELEASE_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID"
+          fi
           
-          ### Compression
-          - **zlib** - Zlib compression
-          - **zip** - ZIP archive support
-          
-          ### Network & Communication
-          - **curl** - cURL library support
-          - **openssl** - OpenSSL support
-          - **sockets** - Socket communication
-          
-          ### Math & Numbers
-          - **bcmath** - Arbitrary precision mathematics
-          
-          ### Internationalization
-          - **intl** - Internationalization functions
-          
-          ### Other Extensions
-          - **json** - JSON support
-          - **pcre** - Perl Compatible Regular Expressions
-          - **posix** - POSIX functions
-          - **readline** - GNU Readline support
-          - **xsl** - XSL transformations
+          git tag -d $STABLE_TAG || true
+          git push --delete origin $STABLE_TAG || true
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release-files/*
+          tag_name: ${{ steps.check-tag.outputs.stable_tag }}
+          name: FrankenPHP v${{ env.FRANKENPHP_VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP 8.3 and 8.4
+            
+            ## Quick Install
+            ```bash
+            tar -xzf frankenphp-linux-amd64-php84.tar.gz
+            cd frankenphp-linux-amd64-php84
+            sudo ./setup-env.sh     # System-wide (recommended)
+            ```
+            
+            ## Downloads
+            - **PHP 8.3**: `frankenphp-linux-amd64-php83.tar.gz`
+            - **PHP 8.4**: `frankenphp-linux-amd64-php84.tar.gz`
+            
+            ## What's Included
+            - FrankenPHP, PHP 8.x with all common extensions, Composer
+            - Node.js 20.x LTS, npm, npx
+            - Git, sqlite3, zip/unzip
+            - Self-contained binaries (work with Supervisor!)
+            
+            ## Two Install Methods
+            1. **System-wide** (`sudo`): Creates `/usr/local/bin` symlinks, works everywhere
+            2. **User-only**: Modifies `~/.bash_profile`, requires sourcing
+            
+            System-wide recommended for production servers.
+        env:
+          GITHUB_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
