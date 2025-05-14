@@ -283,7 +283,8 @@ jobs:
           if [ "$EUID" -eq 0 ]; then
               echo "Installing system-wide..."
               echo "$SCRIPT_DIR/lib" > /etc/ld.so.conf.d/frankenphp.conf
-              ldconfig
+              ldconfig 2>&1 | grep -v "is not a symbolic link" || true
+              
               for binary in frankenphp php composer node npm npx git sqlite3 zip unzip; do
                   if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
                       ln -sf "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
