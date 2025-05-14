@@ -247,7 +247,15 @@ jobs:
           mv dist/bin/php dist/bin/php.real
           cat > dist/bin/php << 'EOF'
           #!/bin/bash
-          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          # Resolve symlinks to get the actual script location
+          SOURCE="${BASH_SOURCE[0]}"
+          while [ -h "$SOURCE" ]; do
+            DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+            SOURCE="$(readlink "$SOURCE")"
+            [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+          done
+          SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+          
           export LD_LIBRARY_PATH="$SCRIPT_DIR/../lib:$LD_LIBRARY_PATH"
           exec "$SCRIPT_DIR/php.real" "$@"
           EOF
@@ -256,7 +264,15 @@ jobs:
           mv dist/bin/frankenphp dist/bin/frankenphp.real
           cat > dist/bin/frankenphp << 'EOF'
           #!/bin/bash
-          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          # Resolve symlinks to get the actual script location
+          SOURCE="${BASH_SOURCE[0]}"
+          while [ -h "$SOURCE" ]; do
+            DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+            SOURCE="$(readlink "$SOURCE")"
+            [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+          done
+          SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+          
           export LD_LIBRARY_PATH="$SCRIPT_DIR/../lib:$LD_LIBRARY_PATH"
           exec "$SCRIPT_DIR/frankenphp.real" "$@"
           EOF
