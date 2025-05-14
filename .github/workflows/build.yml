@@ -290,6 +290,34 @@ jobs:
           ?>
           EOF
           
+          # Create demo.js
+          cat > dist/demo.js << 'EOF'
+          console.log("Node.js version:", process.version);
+          const http = require('http');
+          const server = http.createServer((req, res) => {
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end('Hello from Node.js!\n');
+          });
+          const port = 3000;
+          server.listen(port, () => {
+            console.log(`Node.js server running at http://localhost:${port}/`);
+          });
+          EOF
+          
+          # Create Caddyfile
+          cat > dist/Caddyfile << 'EOF'
+          {
+              frankenphp
+              order php_server before file_server
+          }
+          
+          localhost:8080 {
+              root * .
+              encode gzip
+              php_server
+          }
+          EOF
+          
           # Create setup script
           cat > dist/setup-env.sh << 'EOF'
           #!/bin/bash
@@ -341,6 +369,17 @@ jobs:
           ./setup-env.sh
           source ~/.bash_profile
           ```
+          
+          ## Quick Start Demo
+          
+          After installation, test FrankenPHP immediately:
+          ```bash
+          cd /path/to/frankenphp-directory
+          frankenphp run
+          # Visit http://localhost:8080 to see phpinfo
+          ```
+          
+          The included `Caddyfile` serves the demo `index.php` file.
           
           ## Included Tools
           - FrankenPHP, PHP 8.x, Composer
@@ -438,6 +477,11 @@ jobs:
             tar -xzf frankenphp-linux-amd64-php84.tar.gz
             cd frankenphp-linux-amd64-php84
             sudo ./setup-env.sh     # System-wide (recommended)
+            ```
+            
+            ## Quick Start Demo
+            ```bash
+            frankenphp run   # Starts server on http://localhost:8080
             ```
             
             ## Downloads
