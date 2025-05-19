@@ -15,7 +15,7 @@ jobs:
     outputs:
       latest_version: ${{ steps.get-latest.outputs.latest_version }}
       has_new_version: ${{ steps.check-new.outputs.has_new_version }}
-    
+
     steps:
       - name: Get current FrankenPHP version
         id: get-current
@@ -53,12 +53,12 @@ jobs:
         php:
           - { version: '8.3.20', short: 'php83' }
           - { version: '8.4.6', short: 'php84' }
-    
+
     env:
       FRANKENPHP_VERSION: ${{ needs.check-new-release.outputs.latest_version }}
       PHP_VERSION: ${{ matrix.php.version }}
       PHP_SHORT: ${{ matrix.php.short }}
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -327,28 +327,38 @@ jobs:
           
           if [ "$EUID" -eq 0 ]; then
               echo "Installing system-wide..."
+              # Override the config file
               echo "$SCRIPT_DIR/lib" > /etc/ld.so.conf.d/frankenphp.conf
               ldconfig 2>&1 | grep -v "is not a symbolic link" || true
               
               for binary in frankenphp php composer node npm npx git sqlite3 zip unzip; do
                   if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
+                      # Remove existing target if it's a directory (cannot be symlinked over)
+                      if [ -d "/usr/local/bin/$binary" ]; then
+                          rm -rf "/usr/local/bin/$binary"
+                      fi
+                      # Force create symlink (-f) to override any existing symlinks or files
                       ln -sf "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
                   fi
               done
               echo "System-wide installation completed!"
           else
-              if ! grep -q "$MARKER" "$PROFILE" 2>/dev/null; then
-                  cat >> "$PROFILE" << EOL
+              # For user installation, remove the existing block if present
+              if grep -q "$MARKER" "$PROFILE" 2>/dev/null; then
+                  # Remove existing FrankenPHP setup block
+                  sed -i.bak "/^$MARKER/,/^# End of FrankenPHP environment setup/d" "$PROFILE"
+                  echo "Removed previous installation from $PROFILE"
+              fi
+              
+              # Add new block
+              cat >> "$PROFILE" << EOL
           
           $MARKER
           export PATH="$SCRIPT_DIR/bin:\$PATH"
           export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:\$LD_LIBRARY_PATH"
           # End of FrankenPHP environment setup
           EOL
-                  echo "User installation completed! Run: source ~/.bash_profile"
-              else
-                  echo "Already installed in $PROFILE"
-              fi
+              echo "User installation completed! Run: source ~/.bash_profile"
           fi
           EOF
           chmod +x dist/setup-env.sh
@@ -411,14 +421,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    
+
     env:
       FRANKENPHP_VERSION: ${{ needs.check-new-release.outputs.latest_version }}
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -442,7 +452,7 @@ jobs:
           else
             echo "tag_exists=false" >> $GITHUB_OUTPUT
           fi
-      
+
       - name: Delete existing release
         if: steps.check-tag.outputs.tag_exists == 'true'
         run: |
@@ -459,7 +469,7 @@ jobs:
           
           git tag -d $STABLE_TAG || true
           git push --delete origin $STABLE_TAG || true
-      
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
