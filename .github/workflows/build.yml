@@ -475,7 +475,6 @@ jobs:
             ## Quick Install
             ```bash
             tar -xzf frankenphp-linux-amd64-php84.tar.gz
-            cd frankenphp-linux-amd64-php84
             sudo ./setup-env.sh     # System-wide (recommended)
             ```
             
