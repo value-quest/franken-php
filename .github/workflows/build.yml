@@ -327,39 +327,66 @@ jobs:
           MARKER="# FrankenPHP environment setup"
           
           if [ "$EUID" -eq 0 ]; then
-              echo "Installing system-wide..."
-              # Override the config file
-              echo "$SCRIPT_DIR/lib" > /etc/ld.so.conf.d/frankenphp.conf
-              ldconfig 2>&1 | grep -v "is not a symbolic link" || true
+          echo "Installing system-wide..."
+          # Override the config file
+          echo "$SCRIPT_DIR/lib" > /etc/ld.so.conf.d/frankenphp.conf
+          ldconfig 2>&1 | grep -v "is not a symbolic link" || true
           
-              for binary in frankenphp php composer node npm npx git sqlite3 zip unzip; do
-                  if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
-                      # Remove existing target if it's a directory (cannot be symlinked over)
-                      if [ -d "/usr/local/bin/$binary" ]; then
-                          rm -rf "/usr/local/bin/$binary"
-                      fi
-                      # Force create symlink (-f) to override any existing symlinks or files
-                      ln -sf "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
-                  fi
-              done
-              echo "System-wide installation completed!"
+          # Handle git special case first
+          if [ -f "$SCRIPT_DIR/bin/git" ] && [ -f "$SCRIPT_DIR/bin/git.real" ]; then
+          # We need to install both git and git.real
+          echo "Installing git wrapper and real binary..."
+          
+          # Handle git.real first
+          if [ -d "/usr/local/bin/git.real" ]; then
+          rm -rf "/usr/local/bin/git.real"
+          fi
+          ln -sf "$SCRIPT_DIR/bin/git.real" "/usr/local/bin/git.real"
+          
+          # Then handle git wrapper
+          if [ -d "/usr/local/bin/git" ]; then
+          rm -rf "/usr/local/bin/git"
+          fi
+          
+          # Create a modified git wrapper that uses absolute paths
+          cat > "/usr/local/bin/git" << EOL
+          #!/bin/bash
+          export GIT_EXEC_PATH="$SCRIPT_DIR/libexec/git-core"
+          exec "/usr/local/bin/git.real" "\$@"
+          EOL
+          chmod +x "/usr/local/bin/git"
+          echo "Git installation completed with absolute paths"
+          fi
+          
+          # Now handle the rest of the binaries
+          for binary in frankenphp php composer node npm npx sqlite3 zip unzip; do
+          if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
+          # Remove existing target if it's a directory (cannot be symlinked over)
+          if [ -d "/usr/local/bin/$binary" ]; then
+          rm -rf "/usr/local/bin/$binary"
+          fi
+          # Force create symlink (-f) to override any existing symlinks or files
+          ln -sf "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
+          fi
+          done
+          
+          echo "System-wide installation completed!"
           else
-              # For user installation, remove the existing block if present
-              if grep -q "$MARKER" "$PROFILE" 2>/dev/null; then
-                  # Remove existing FrankenPHP setup block
-                  sed -i.bak "/^$MARKER/,/^# End of FrankenPHP environment setup/d" "$PROFILE"
-                  echo "Removed previous installation from $PROFILE"
-              fi
+          # For user installation, remove the existing block if present
+          if grep -q "$MARKER" "$PROFILE" 2>/dev/null; then
+          # Remove existing FrankenPHP setup block
+          sed -i.bak "/^$MARKER/,/^# End of FrankenPHP environment setup/d" "$PROFILE"
+          echo "Removed previous installation from $PROFILE"
+          fi
           
-              # Add new block
-              cat >> "$PROFILE" << EOL
-          
+          # Add new block
+          cat >> "$PROFILE" << EOL
           $MARKER
           export PATH="$SCRIPT_DIR/bin:\$PATH"
           export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:\$LD_LIBRARY_PATH"
           # End of FrankenPHP environment setup
           EOL
-              echo "User installation completed! Run: source ~/.bash_profile"
+            echo "User installation completed! Run: source ~/.bash_profile"
           fi
           EOF
           chmod +x dist/setup-env.sh
