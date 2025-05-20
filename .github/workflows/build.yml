@@ -10,29 +10,31 @@ on:
     - cron: '0 0 * * *'  # Run daily at midnight to check for new FrankenPHP releases
 
 jobs:
-  check-new-release:
+  check-versions:
     runs-on: ubuntu-latest
     outputs:
-      latest_version: ${{ steps.get-latest.outputs.latest_version }}
-      has_new_version: ${{ steps.check-new.outputs.has_new_version }}
+      frankenphp_version: ${{ steps.get-frankenphp-latest.outputs.latest_version }}
+      frankenphp_new_version: ${{ steps.check-frankenphp-new.outputs.has_new_version }}
+      php83_version: ${{ steps.get-php83.outputs.version }}
+      php84_version: ${{ steps.get-php84.outputs.version }}
 
     steps:
       - name: Get current FrankenPHP version
-        id: get-current
+        id: get-frankenphp-current
         run: |
           echo "current_version=1.4.0" >> $GITHUB_OUTPUT
 
-      - name: Get latest release from GitHub API
-        id: get-latest
+      - name: Get latest FrankenPHP release from GitHub API
+        id: get-frankenphp-latest
         run: |
           LATEST_VERSION=$(curl -s https://api.github.com/repos/dunglas/frankenphp/releases/latest | jq -r '.tag_name' | sed 's/v//')
           echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Check if there's a new version
-        id: check-new
+      - name: Check if there's a new FrankenPHP version
+        id: check-frankenphp-new
         run: |
-          CURRENT_VERSION="${{ steps.get-current.outputs.current_version }}"
-          LATEST_VERSION="${{ steps.get-latest.outputs.latest_version }}"
+          CURRENT_VERSION="${{ steps.get-frankenphp-current.outputs.current_version }}"
+          LATEST_VERSION="${{ steps.get-frankenphp-latest.outputs.latest_version }}"
           
           if [ "$CURRENT_VERSION" != "$LATEST_VERSION" ]; then
             echo "New FrankenPHP version available: $LATEST_VERSION (current: $CURRENT_VERSION)"
@@ -42,20 +44,36 @@ jobs:
             echo "has_new_version=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Get latest PHP 8.3 version
+        id: get-php83
+        run: |
+          # Get the latest PHP 8.3.x version
+          PHP83_VERSION=$(curl -s 'https://www.php.net/releases/index.php?json&version=8.3' | jq -r '.version')
+          echo "Latest PHP 8.3 version: $PHP83_VERSION"
+          echo "version=$PHP83_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Get latest PHP 8.4 version
+        id: get-php84
+        run: |
+          # Get the latest PHP 8.4.x version
+          PHP84_VERSION=$(curl -s 'https://www.php.net/releases/index.php?json&version=8.4' | jq -r '.version')
+          echo "Latest PHP 8.4 version: $PHP84_VERSION"
+          echo "version=$PHP84_VERSION" >> $GITHUB_OUTPUT
+
   build-php:
-    needs: check-new-release
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'pull_request' || needs.check-new-release.outputs.has_new_version == 'true' }}
+    needs: check-versions
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'pull_request' || needs.check-versions.outputs.frankenphp_new_version == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     strategy:
       matrix:
         php:
-          - { version: '8.3.20', short: 'php83' }
-          - { version: '8.4.6', short: 'php84' }
+          - { version: '${{ needs.check-versions.outputs.php83_version }}', short: 'php83' }
+          - { version: '${{ needs.check-versions.outputs.php84_version }}', short: 'php84' }
 
     env:
-      FRANKENPHP_VERSION: ${{ needs.check-new-release.outputs.latest_version }}
+      FRANKENPHP_VERSION: ${{ needs.check-versions.outputs.frankenphp_version }}
       PHP_VERSION: ${{ matrix.php.version }}
       PHP_SHORT: ${{ matrix.php.short }}
 
@@ -290,19 +308,7 @@ jobs:
           ?>
           EOF
           
-          # Create demo.js
-          cat > dist/demo.js << 'EOF'
-          console.log("Node.js version:", process.version);
-          const http = require('http');
-          const server = http.createServer((req, res) => {
-            res.writeHead(200, { 'Content-Type': 'text/plain' });
-            res.end('Hello from Node.js!\n');
-          });
-          const port = 3000;
-          server.listen(port, () => {
-            console.log(`Node.js server running at http://localhost:${port}/`);
-          });
-          EOF
+# demo.js has been removed
           
           # Create Caddyfile
           cat > dist/Caddyfile << 'EOF'
@@ -416,14 +422,16 @@ jobs:
           retention-days: 7
 
   create-release:
-    needs: [check-new-release, build-php]
+    needs: [check-versions, build-php]
     if: ${{ always() && needs.build-php.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     env:
-      FRANKENPHP_VERSION: ${{ needs.check-new-release.outputs.latest_version }}
+      FRANKENPHP_VERSION: ${{ needs.check-versions.outputs.frankenphp_version }}
+      PHP83_VERSION: ${{ needs.check-versions.outputs.php83_version }}
+      PHP84_VERSION: ${{ needs.check-versions.outputs.php84_version }}
 
     steps:
       - name: Checkout repository
@@ -480,7 +488,7 @@ jobs:
           prerelease: false
           generate_release_notes: true
           body: |
-            FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP 8.3 and 8.4
+            FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP 8.3 (${{ env.PHP83_VERSION }}) and PHP 8.4 (${{ env.PHP84_VERSION }})
             
             ## Quick Install
             ```bash
@@ -494,8 +502,8 @@ jobs:
             ```
             
             ## Downloads
-            - **PHP 8.3**: `frankenphp-linux-amd64-php83.tar.gz`
-            - **PHP 8.4**: `frankenphp-linux-amd64-php84.tar.gz`
+            - **PHP 8.3.x**: `frankenphp-linux-amd64-php83.tar.gz` (PHP ${{ env.PHP83_VERSION }})
+            - **PHP 8.4.x**: `frankenphp-linux-amd64-php84.tar.gz` (PHP ${{ env.PHP84_VERSION }})
             
             ## What's Included
             - FrankenPHP, PHP 8.x with all common extensions, Composer
