@@ -95,7 +95,6 @@ npx create-react-app my-app
 ├── libexec/          # Git helper programs
 ├── Caddyfile         # Example server configuration
 ├── index.php         # PHP info demo
-├── demo.js           # Node.js demo
 ├── setup-env.sh      # Installation script
 └── README.md
 ```
