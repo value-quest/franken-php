@@ -180,12 +180,12 @@ jobs:
           # Copy PHP shared library
           PHP_LIB_PATH="$(php-config --prefix)/lib/libphp.so"
           if [ -f "$PHP_LIB_PATH" ]; then
-            cp "$PHP_LIB_PATH" dist/lib/
-            echo "Copied libphp.so from $PHP_LIB_PATH"
+          cp "$PHP_LIB_PATH" dist/lib/
+          echo "Copied libphp.so from $PHP_LIB_PATH"
           else
-            echo "ERROR: Cannot find libphp.so at $PHP_LIB_PATH"
-            find /usr/local -name "libphp.so"
-            exit 1
+          echo "ERROR: Cannot find libphp.so at $PHP_LIB_PATH"
+          find /usr/local -name "libphp.so"
+          exit 1
           fi
           
           # Copy PHP binaries
@@ -198,52 +198,52 @@ jobs:
           
           # Copy sqlite3, zip, unzip
           for tool in sqlite3 zip unzip; do
-            if command -v $tool &> /dev/null; then
-              cp $(which $tool) dist/bin/
-              echo "Copied $tool"
-            fi
+          if command -v $tool &> /dev/null; then
+           cp $(which $tool) dist/bin/
+           echo "Copied $tool"
+          fi
           done
           
           # Copy git and helpers
           if command -v git &> /dev/null; then
-            cp $(which git) dist/bin/
-            GIT_EXEC_PATH=$(git --exec-path)
-            if [ -d "$GIT_EXEC_PATH" ]; then
-              mkdir -p dist/libexec/git-core
-              cp -r "$GIT_EXEC_PATH"/* dist/libexec/git-core/
-              mv dist/bin/git dist/bin/git.real
-              cat > dist/bin/git << 'EOF'
+          cp $(which git) dist/bin/
+          GIT_EXEC_PATH=$(git --exec-path)
+          if [ -d "$GIT_EXEC_PATH" ]; then
+           mkdir -p dist/libexec/git-core
+           cp -r "$GIT_EXEC_PATH"/* dist/libexec/git-core/
+           mv dist/bin/git dist/bin/git.real
+           cat > dist/bin/git << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
           export GIT_EXEC_PATH="$SCRIPT_DIR/../libexec/git-core"
           exec "$SCRIPT_DIR/git.real" "$@"
           EOF
-              chmod +x dist/bin/git
-            fi
+           chmod +x dist/bin/git
+          fi
           fi
           
           # Copy Node.js and npm
           if command -v node &> /dev/null; then
-            cp $(which node) dist/bin/
-            NPM_PREFIX=$(npm config get prefix)
-            mkdir -p dist/lib/node_modules
-            if [ -d "$NPM_PREFIX/lib/node_modules/npm" ]; then
-              cp -r "$NPM_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
-            fi
-            cat > dist/bin/npm << 'EOF'
+          cp $(which node) dist/bin/
+          NPM_PREFIX=$(npm config get prefix)
+          mkdir -p dist/lib/node_modules
+          if [ -d "$NPM_PREFIX/lib/node_modules/npm" ]; then
+           cp -r "$NPM_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
+          fi
+          cat > dist/bin/npm << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
           export NODE_PATH="$SCRIPT_DIR/../lib/node_modules"
           exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npm-cli.js" "$@"
           EOF
-            chmod +x dist/bin/npm
-            cat > dist/bin/npx << 'EOF'
+          chmod +x dist/bin/npm
+          cat > dist/bin/npx << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
           export NODE_PATH="$SCRIPT_DIR/../lib/node_modules"
           exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npx-cli.js" "$@"
           EOF
-            chmod +x dist/bin/npx
+          chmod +x dist/bin/npx
           fi
           
           # Copy FrankenPHP binary
@@ -253,12 +253,12 @@ jobs:
           # Copy all required shared libraries
           echo "Copying shared library dependencies..."
           for binary in frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp "$PHP_BIN_PATH/php" "$PHP_LIB_PATH"; do
-            ldd "$binary" | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
+          ldd "$binary" | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
           done
           
           # Copy additional common libraries
           for lib in libzip.so* libpng16.so* libjpeg.so* libfreetype.so* libicu*.so* libonig.so* libxml2.so* libxslt.so* libgd.so* libssl.so* libcrypto.so* libcurl.so* libmariadb.so*; do
-            find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/local/lib -name "$lib" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
+          find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/local/lib -name "$lib" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
           done
           
           # Create self-contained wrapper scripts
@@ -268,9 +268,9 @@ jobs:
           # Resolve symlinks to get the actual script location
           SOURCE="${BASH_SOURCE[0]}"
           while [ -h "$SOURCE" ]; do
-            DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
-            SOURCE="$(readlink "$SOURCE")"
-            [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+          DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+          SOURCE="$(readlink "$SOURCE")"
+          [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
           done
           SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
           
@@ -285,9 +285,9 @@ jobs:
           # Resolve symlinks to get the actual script location
           SOURCE="${BASH_SOURCE[0]}"
           while [ -h "$SOURCE" ]; do
-            DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
-            SOURCE="$(readlink "$SOURCE")"
-            [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+          DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+          SOURCE="$(readlink "$SOURCE")"
+          [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
           done
           SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
           
@@ -308,111 +308,111 @@ jobs:
           ?>
           EOF
           
-# demo.js has been removed
+          # demo.js has been removed
           
           # Create Caddyfile
           cat > dist/Caddyfile << 'EOF'
           {
-              frankenphp
-              order php_server before file_server
+             frankenphp
+             order php_server before file_server
           }
           
           localhost:8080 {
-              root * .
-              encode gzip
-              php_server
+             root * .
+             encode gzip
+             php_server
           }
           EOF
           
           # Create setup script
-          cat > dist/setup-env.sh << 'EOF'
+              cat > dist/setup-env.sh << 'EOF'
           #!/bin/bash
-          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
-          PROFILE="$HOME/.bash_profile"
-          MARKER="# FrankenPHP environment setup"
+              SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+              PROFILE="$HOME/.bash_profile"
+              MARKER="# FrankenPHP environment setup"
           
-          if [ "$EUID" -eq 0 ]; then
+              if [ "$EUID" -eq 0 ]; then
               echo "Installing system-wide..."
-              # Override the config file
+          # Override the config file
               echo "$SCRIPT_DIR/lib" > /etc/ld.so.conf.d/frankenphp.conf
               ldconfig 2>&1 | grep -v "is not a symbolic link" || true
-              
+          
               for binary in frankenphp php composer node npm npx git sqlite3 zip unzip; do
-                  if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
-                      # Remove existing target if it's a directory (cannot be symlinked over)
-                      if [ -d "/usr/local/bin/$binary" ]; then
-                          rm -rf "/usr/local/bin/$binary"
-                      fi
-                      # Force create symlink (-f) to override any existing symlinks or files
-                      ln -sf "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
-                  fi
+              if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
+          # Remove existing target if it's a directory (cannot be symlinked over)
+              if [ -d "/usr/local/bin/$binary" ]; then
+              rm -rf "/usr/local/bin/$binary"
+              fi
+          # Force create symlink (-f) to override any existing symlinks or files
+              ln -sf "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
+              fi
               done
               echo "System-wide installation completed!"
-          else
-              # For user installation, remove the existing block if present
+              else
+          # For user installation, remove the existing block if present
               if grep -q "$MARKER" "$PROFILE" 2>/dev/null; then
-                  # Remove existing FrankenPHP setup block
-                  sed -i.bak "/^$MARKER/,/^# End of FrankenPHP environment setup/d" "$PROFILE"
-                  echo "Removed previous installation from $PROFILE"
+          # Remove existing FrankenPHP setup block
+              sed -i.bak "/^$MARKER/,/^# End of FrankenPHP environment setup/d" "$PROFILE"
+              echo "Removed previous installation from $PROFILE"
               fi
-              
-              # Add new block
+          
+          # Add new block
               cat >> "$PROFILE" << EOL
           
-          $MARKER
-          export PATH="$SCRIPT_DIR/bin:\$PATH"
-          export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:\$LD_LIBRARY_PATH"
+              $MARKER
+              export PATH="$SCRIPT_DIR/bin:\$PATH"
+              export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:\$LD_LIBRARY_PATH"
           # End of FrankenPHP environment setup
-          EOL
+              EOL
               echo "User installation completed! Run: source ~/.bash_profile"
-          fi
-          EOF
-          chmod +x dist/setup-env.sh
+              fi
+              EOF
+              chmod +x dist/setup-env.sh
           
           # Create README
-          cat > dist/README.md << 'EOF'
+              cat > dist/README.md << 'EOF'
           # FrankenPHP Distribution
           
           ## Installation
           
           ### System-wide (recommended for servers)
-          ```bash
-          sudo ./setup-env.sh
-          ```
+              ```bash
+              sudo ./setup-env.sh
+              ```
           
           ### User-only
-          ```bash
-          ./setup-env.sh
-          source ~/.bash_profile
-          ```
+              ```bash
+              ./setup-env.sh
+              source ~/.bash_profile
+              ```
           
           ## Quick Start Demo
           
-          After installation, test FrankenPHP immediately:
-          ```bash
-          cd /path/to/frankenphp-directory
-          frankenphp run
+              After installation, test FrankenPHP immediately:
+              ```bash
+              cd /path/to/frankenphp-directory
+              frankenphp run
           # Visit http://localhost:8080 to see phpinfo
-          ```
+              ```
           
-          The included `Caddyfile` serves the demo `index.php` file.
+              The included `Caddyfile` serves the demo `index.php` file.
           
           ## Included Tools
-          - FrankenPHP, PHP 8.x, Composer
-          - Node.js 20.x LTS, npm, npx
-          - Git, sqlite3, zip/unzip
+              - FrankenPHP, PHP 8.x, Composer
+              - Node.js 20.x LTS, npm, npx
+              - Git, sqlite3, zip/unzip
           
           ## PHP Extensions
-          Core, DOM, MB, XML, PDO, MySQL, SQLite, GD, Zlib, Curl, OpenSSL, BCMath, Intl, PCNTL, and more.
+              Core, DOM, MB, XML, PDO, MySQL, SQLite, GD, Zlib, Curl, OpenSSL, BCMath, Intl, PCNTL, and more.
           
           ## Laravel Octane Support
-          Includes ext-pcntl required for Laravel Octane process management.
-          EOF
+              Includes ext-pcntl required for Laravel Octane process management.
+              EOF
           
           # Create archive
-          cd dist
-          tar -czf ../frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz .
-          cd ..
+              cd dist
+              tar -czf ../frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz .
+              cd ..
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
@@ -422,7 +422,7 @@ jobs:
           retention-days: 7
 
   create-release:
-    needs: [check-versions, build-php]
+    needs: [ check-versions, build-php ]
     if: ${{ always() && needs.build-php.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
