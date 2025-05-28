@@ -322,15 +322,36 @@ jobs:
           # Create setup script
           cat > dist/setup-env.sh << 'EOF'
           #!/bin/bash
+                    #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
           PROFILE="$HOME/.bash_profile"
           MARKER="# FrankenPHP environment setup"
           
           if [ "$EUID" -eq 0 ]; then
           echo "Installing system-wide..."
-          # Override the config file
-          echo "$SCRIPT_DIR/lib" > /etc/ld.so.conf.d/frankenphp.conf
+          
+          # Copy libraries to /usr/local/lib
+          echo "Copying libraries to /usr/local/lib..."
+          mkdir -p /usr/local/lib
+          cp -r "$SCRIPT_DIR/lib"/* /usr/local/lib/
+          
+          # Update ldconfig
+          echo "/usr/local/lib" > /etc/ld.so.conf.d/frankenphp.conf
           ldconfig 2>&1 | grep -v "is not a symbolic link" || true
+          
+          # Copy Node.js modules to /usr/local/lib if they exist
+          if [ -d "$SCRIPT_DIR/lib/node_modules" ]; then
+            echo "Copying Node.js modules to /usr/local/lib..."
+            mkdir -p /usr/local/lib/node_modules
+            cp -r "$SCRIPT_DIR/lib/node_modules"/* /usr/local/lib/node_modules/
+          fi
+          
+          # Copy git libexec if it exists
+          if [ -d "$SCRIPT_DIR/libexec" ]; then
+            echo "Copying git libexec to /usr/local/libexec..."
+            mkdir -p /usr/local/libexec
+            cp -r "$SCRIPT_DIR/libexec"/* /usr/local/libexec/
+          fi
           
           # Handle git special case first
           if [ -f "$SCRIPT_DIR/bin/git" ] && [ -f "$SCRIPT_DIR/bin/git.real" ]; then
@@ -341,36 +362,79 @@ jobs:
           if [ -d "/usr/local/bin/git.real" ]; then
           rm -rf "/usr/local/bin/git.real"
           fi
-          ln -sf "$SCRIPT_DIR/bin/git.real" "/usr/local/bin/git.real"
+          cp "$SCRIPT_DIR/bin/git.real" "/usr/local/bin/git.real"
+          chmod +x "/usr/local/bin/git.real"
           
           # Then handle git wrapper
           if [ -d "/usr/local/bin/git" ]; then
           rm -rf "/usr/local/bin/git"
           fi
           
-          # Create a modified git wrapper that uses absolute paths
+          # Create a modified git wrapper that uses system paths
           cat > "/usr/local/bin/git" << EOL
           #!/bin/bash
-          export GIT_EXEC_PATH="$SCRIPT_DIR/libexec/git-core"
+          export GIT_EXEC_PATH="/usr/local/libexec/git-core"
           exec "/usr/local/bin/git.real" "\$@"
           EOL
           chmod +x "/usr/local/bin/git"
-          echo "Git installation completed with absolute paths"
+          echo "Git installation completed with system paths"
           fi
           
-          # Now handle the rest of the binaries
-          for binary in frankenphp php composer node npm npx sqlite3 zip unzip; do
-          if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
-          # Remove existing target if it's a directory (cannot be symlinked over)
-          if [ -d "/usr/local/bin/$binary" ]; then
-          rm -rf "/usr/local/bin/$binary"
+          # Create system-wide wrapper scripts for binaries that need LD_LIBRARY_PATH
+          for binary in frankenphp php; do
+          if [ -f "$SCRIPT_DIR/bin/$binary.real" ]; then
+            echo "Creating system wrapper for $binary..."
+            cat > "/usr/local/bin/$binary" << EOL
+          #!/bin/bash
+          export LD_LIBRARY_PATH="/usr/local/lib:\$LD_LIBRARY_PATH"
+          exec "/usr/local/bin/$binary.real" "\$@"
+          EOL
+            chmod +x "/usr/local/bin/$binary"
+          
+            # Copy the real binary
+            cp "$SCRIPT_DIR/bin/$binary.real" "/usr/local/bin/$binary.real"
+            chmod +x "/usr/local/bin/$binary.real"
           fi
-          # Force create symlink (-f) to override any existing symlinks or files
-          ln -sf "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
+          done
+          
+          # Handle other binaries (composer, node, npm, npx, sqlite3, zip, unzip)
+          for binary in composer node npm npx sqlite3 zip unzip; do
+          if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
+            # Remove existing target if it's a directory
+            if [ -d "/usr/local/bin/$binary" ]; then
+              rm -rf "/usr/local/bin/$binary"
+            fi
+          
+            # For Node.js binaries, update the wrapper scripts to use system paths
+            if [ "$binary" = "npm" ] || [ "$binary" = "npx" ]; then
+              if [ -f "/usr/local/bin/node" ]; then
+                echo "Creating system wrapper for $binary..."
+                if [ "$binary" = "npm" ]; then
+                  cat > "/usr/local/bin/$binary" << EOL
+          #!/bin/bash
+          export NODE_PATH="/usr/local/lib/node_modules"
+          exec "/usr/local/bin/node" "/usr/local/lib/node_modules/npm/bin/npm-cli.js" "\$@"
+          EOL
+                else
+                  cat > "/usr/local/bin/$binary" << EOL
+          #!/bin/bash
+          export NODE_PATH="/usr/local/lib/node_modules"
+          exec "/usr/local/bin/node" "/usr/local/lib/node_modules/npm/bin/npx-cli.js" "\$@"
+          EOL
+                fi
+                chmod +x "/usr/local/bin/$binary"
+              fi
+            else
+              # For other binaries, just copy them
+              cp "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
+              chmod +x "/usr/local/bin/$binary"
+            fi
           fi
           done
           
           echo "System-wide installation completed!"
+          echo "Libraries installed to: /usr/local/lib"
+          echo "Binaries installed to: /usr/local/bin"
           else
           # For user installation, remove the existing block if present
           if grep -q "$MARKER" "$PROFILE" 2>/dev/null; then
@@ -387,7 +451,7 @@ jobs:
           # End of FrankenPHP environment setup
           EOL
             echo "User installation completed! Run: source ~/.bash_profile"
-          fi
+          fi          
           EOF
           chmod +x dist/setup-env.sh
           
