@@ -222,12 +222,32 @@ jobs:
           if command -v node &> /dev/null; then
             echo "Using existing Node.js installation in /usr/local/bin"
             
+            # Find where npm is actually installed
             NPM_PREFIX=$(npm config get prefix)
+            echo "NPM prefix: $NPM_PREFIX"
+            
             sudo mkdir -p /usr/local/lib/node_modules
-            if [ -d "$NPM_PREFIX/lib/node_modules/npm" ]; then
+            
+            # Look for npm in common locations
+            NPM_SOURCE=""
+            for npm_path in "$NPM_PREFIX/lib/node_modules/npm" "/usr/lib/node_modules/npm" "/usr/local/lib/node_modules/npm"; do
+              if [ -d "$npm_path" ]; then
+                NPM_SOURCE="$npm_path"
+                echo "Found npm at: $NPM_SOURCE"
+                break
+              fi
+            done
+            
+            if [ -n "$NPM_SOURCE" ] && [ -d "$NPM_SOURCE" ]; then
               sudo rm -rf /usr/local/lib/node_modules/npm
-              sudo cp -r "$NPM_PREFIX/lib/node_modules/npm" /usr/local/lib/node_modules/
+              sudo cp -r "$NPM_SOURCE" /usr/local/lib/node_modules/
+              echo "Copied npm modules to /usr/local/lib/node_modules/"
+            else
+              echo "Warning: Could not find npm modules directory"
+              echo "Available locations:"
+              find /usr -name "npm" -type d 2>/dev/null | head -5
             fi
+            
             sudo tee /usr/local/bin/npm << 'EOF'
           #!/bin/bash
           export NODE_PATH="/usr/local/lib/node_modules"
