@@ -259,6 +259,26 @@ jobs:
           # Create a temporary directory for packaging
           mkdir -p package
           
+          # Copy all installed binaries from /usr/local/bin
+          sudo mkdir -p package/usr/local/bin
+          sudo cp -rf /usr/local/bin/* package/usr/local/bin/
+          
+          # Copy all libraries from /usr/local/lib/frankenphp
+          sudo mkdir -p package/usr/local/lib/frankenphp
+          sudo cp -rf /usr/local/lib/frankenphp/* package/usr/local/lib/frankenphp/
+          
+          # Copy git-core files
+          if [ -d "/usr/local/libexec/git-core" ]; then
+            sudo mkdir -p package/usr/local/libexec/git-core
+            sudo cp -rf /usr/local/libexec/git-core/* package/usr/local/libexec/git-core/
+          fi
+          
+          # Copy ldconfig configuration
+          if [ -f "/etc/ld.so.conf.d/frankenphp.conf" ]; then
+            sudo mkdir -p package/etc/ld.so.conf.d
+            sudo cp /etc/ld.so.conf.d/frankenphp.conf package/etc/ld.so.conf.d/
+          fi
+          
           # Create index.php
           cat > package/index.php << EOF
           <?php
@@ -285,24 +305,75 @@ jobs:
           }
           EOF
           
+          # Create installation script
+          cat > package/install.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          echo "Installing FrankenPHP distribution..."
+          
+          # Copy binaries
+          if [ -d "usr/local/bin" ]; then
+            sudo cp -rf usr/local/bin/* /usr/local/bin/
+            echo "✓ Installed binaries to /usr/local/bin"
+          fi
+          
+          # Copy libraries
+          if [ -d "usr/local/lib/frankenphp" ]; then
+            sudo mkdir -p /usr/local/lib/frankenphp
+            sudo cp -rf usr/local/lib/frankenphp/* /usr/local/lib/frankenphp/
+            echo "✓ Installed libraries to /usr/local/lib/frankenphp"
+          fi
+          
+          # Copy git-core files
+          if [ -d "usr/local/libexec/git-core" ]; then
+            sudo mkdir -p /usr/local/libexec/git-core
+            sudo cp -rf usr/local/libexec/git-core/* /usr/local/libexec/git-core/
+            echo "✓ Installed git-core to /usr/local/libexec/git-core"
+          fi
+          
+          # Install ldconfig configuration
+          if [ -f "etc/ld.so.conf.d/frankenphp.conf" ]; then
+            sudo cp etc/ld.so.conf.d/frankenphp.conf /etc/ld.so.conf.d/
+            sudo ldconfig
+            echo "✓ Updated ldconfig"
+          fi
+          
+          echo "Installation completed successfully!"
+          echo ""
+          echo "Quick test:"
+          echo "  frankenphp run"
+          echo "  # Visit http://localhost:8080"
+          EOF
+          
+          chmod +x package/install.sh
+          
           # Create README
           cat > package/README.md << 'EOF'
           # FrankenPHP Distribution
           
-          This distribution has been pre-installed to `/usr/local/bin` and is ready to use.
+          This distribution contains FrankenPHP with all required binaries and libraries.
+          
+          ## Installation
+          
+          Extract and run the installer:
+          ```bash
+          tar -xzf frankenphp-linux-amd64-phpXX.tar.gz
+          cd frankenphp-*
+          sudo ./install.sh
+          ```
           
           ## Quick Start Demo
           
-          Test FrankenPHP immediately:
+          After installation, test FrankenPHP:
           ```bash
-          cd /path/to/this/directory
           frankenphp run
           # Visit http://localhost:8080 to see phpinfo
           ```
           
           The included `Caddyfile` serves the demo `index.php` file.
           
-          ## Included Tools (all in /usr/local/bin)
+          ## What's Included (installed to /usr/local/bin)
           - FrankenPHP, PHP 8.x, Composer
           - Node.js 20.x LTS, npm, npx
           - Git, sqlite3, zip/unzip
@@ -315,12 +386,30 @@ jobs:
           
           ## Libraries
           All required libraries are installed in `/usr/local/lib/frankenphp/` and configured via ldconfig.
+          
+          ## Directory Structure
+          ```
+          usr/local/bin/          # All executables
+          usr/local/lib/frankenphp/  # Shared libraries
+          usr/local/libexec/git-core/  # Git core files
+          etc/ld.so.conf.d/       # Library configuration
+          install.sh              # Installation script
+          index.php               # Demo file
+          Caddyfile              # Demo server config
+          ```
           EOF
+          
+          # Change ownership to current user for packaging
+          sudo chown -R $(id -u):$(id -g) package
           
           # Create archive
           cd package
           tar -czf ../frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz .
           cd ..
+          
+          # Show what's in the archive
+          echo "Archive contents:"
+          tar -tzf frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz | head -20
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
