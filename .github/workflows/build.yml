@@ -243,6 +243,48 @@ jobs:
             echo "Installed npm and npx to /usr/local/bin"
           fi
           
+          # Install git (force overwrite with wrapper for git-core support)
+          if command -v git &> /dev/null; then
+            sudo cp $(which git) /usr/local/bin/git.real
+            GIT_EXEC_PATH=$(git --exec-path)
+            if [ -d "$GIT_EXEC_PATH" ]; then
+              sudo cp -r "$GIT_EXEC_PATH"/* /usr/local/libexec/git-core/
+              sudo tee /usr/local/bin/git << 'EOF'
+          #!/bin/bash
+          export GIT_EXEC_PATH="/usr/local/libexec/git-core"
+          exec "/usr/local/bin/git.real" "$@"
+          EOF
+              sudo chmod +x /usr/local/bin/git
+              echo "Installed git with git-core support to /usr/local/bin"
+            fi
+          fi
+          
+          # Install Node.js and npm (force overwrite)
+          if command -v node &> /dev/null; then
+            sudo cp $(which node) /usr/local/bin/
+            echo "Installed node to /usr/local/bin"
+            
+            NPM_PREFIX=$(npm config get prefix)
+            sudo mkdir -p /usr/local/lib/node_modules
+            if [ -d "$NPM_PREFIX/lib/node_modules/npm" ]; then
+              sudo rm -rf /usr/local/lib/node_modules/npm
+              sudo cp -r "$NPM_PREFIX/lib/node_modules/npm" /usr/local/lib/node_modules/
+            fi
+            sudo tee /usr/local/bin/npm << 'EOF'
+          #!/bin/bash
+          export NODE_PATH="/usr/local/lib/node_modules"
+          exec "/usr/local/bin/node" "/usr/local/lib/node_modules/npm/bin/npm-cli.js" "$@"
+          EOF
+            sudo chmod +x /usr/local/bin/npm
+            sudo tee /usr/local/bin/npx << 'EOF'
+          #!/bin/bash
+          export NODE_PATH="/usr/local/lib/node_modules"
+          exec "/usr/local/bin/node" "/usr/local/lib/node_modules/npm/bin/npx-cli.js" "$@"
+          EOF
+            sudo chmod +x /usr/local/bin/npx
+            echo "Installed npm and npx to /usr/local/bin"
+          fi
+          
           # Install FrankenPHP binary (force overwrite)
           sudo cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp /usr/local/bin/frankenphp
           sudo chmod +x /usr/local/bin/frankenphp
