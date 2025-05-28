@@ -319,7 +319,7 @@ jobs:
           }
           EOF
           
-          # Create setup script
+          # Create setup script - FIXED VERSION
           cat > dist/setup-env.sh << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
@@ -337,16 +337,9 @@ jobs:
           # We need to install both git and git.real
           echo "Installing git wrapper and real binary..."
           
-          # Handle git.real first
-          if [ -d "/usr/local/bin/git.real" ]; then
-          rm -rf "/usr/local/bin/git.real"
-          fi
-          ln -sf "$SCRIPT_DIR/bin/git.real" "/usr/local/bin/git.real"
-          
-          # Then handle git wrapper
-          if [ -d "/usr/local/bin/git" ]; then
-          rm -rf "/usr/local/bin/git"
-          fi
+          # Copy git.real first
+          cp "$SCRIPT_DIR/bin/git.real" "/usr/local/bin/git.real"
+          chmod +x "/usr/local/bin/git.real"
           
           # Create a modified git wrapper that uses absolute paths
           cat > "/usr/local/bin/git" << EOL
@@ -358,15 +351,15 @@ jobs:
           echo "Git installation completed with absolute paths"
           fi
           
-          # Now handle the rest of the binaries
+          # Now handle the rest of the binaries - COPY instead of symlink
           for binary in frankenphp php composer node npm npx sqlite3 zip unzip; do
           if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
-          # Remove existing target if it's a directory (cannot be symlinked over)
-          if [ -d "/usr/local/bin/$binary" ]; then
-          rm -rf "/usr/local/bin/$binary"
-          fi
-          # Force create symlink (-f) to override any existing symlinks or files
-          ln -sf "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
+          # Remove existing target if it exists
+          rm -f "/usr/local/bin/$binary"
+          # COPY the binary instead of symlinking
+          cp "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
+          chmod +x "/usr/local/bin/$binary"
+          echo "Copied $binary to /usr/local/bin/"
           fi
           done
           
