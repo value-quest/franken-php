@@ -14,12 +14,12 @@ No further installation is needed to run your PHP app!
    
    **System-wide installation (recommended for servers):**
    ```bash
-   sudo ./setup-env.sh
+   sudo ./install.sh
    ```
    
    **User installation (for development):**
    ```bash
-   ./setup-env.sh
+   ./install.sh
    source ~/.bash_profile
    ```
 
