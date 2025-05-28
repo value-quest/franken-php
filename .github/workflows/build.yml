@@ -177,7 +177,7 @@ jobs:
           # Copy PHP shared library
           PHP_LIB_PATH="$(php-config --prefix)/lib/libphp.so"
           if [ -f "$PHP_LIB_PATH" ]; then
-            sudo cp "$PHP_LIB_PATH" /usr/local/lib/frankenphp/
+            sudo cp -f "$PHP_LIB_PATH" /usr/local/lib/frankenphp/
             echo "Copied libphp.so from $PHP_LIB_PATH"
           else
             echo "ERROR: Cannot find libphp.so at $PHP_LIB_PATH"
@@ -185,31 +185,34 @@ jobs:
             exit 1
           fi
           
-          # PHP binaries are already installed to /usr/local/bin by 'make install' - keep them as-is
-          echo "PHP binaries already installed to /usr/local/bin"
+          # PHP binaries are already installed to /usr/local/bin by 'make install'
+          echo "PHP binaries already in /usr/local/bin from make install"
           
-          # Install composer (force overwrite if exists)
-          sudo cp composer.phar /usr/local/bin/composer
+          # Node.js, npm, npx are already installed to /usr/local/bin by NodeSource
+          echo "Node.js, npm, npx already in /usr/local/bin from NodeSource"
+          
+          # Install composer
+          sudo cp -f composer.phar /usr/local/bin/composer
           sudo chmod +x /usr/local/bin/composer
           echo "Installed composer to /usr/local/bin"
           
-          # Install sqlite3, zip, unzip (force overwrite)
+          # Install system tools from /usr/bin to /usr/local/bin
           for tool in sqlite3 zip unzip; do
             if command -v $tool &> /dev/null; then
-              sudo cp $(which $tool) /usr/local/bin/
+              sudo cp -f $(which $tool) /usr/local/bin/
               echo "Installed $tool to /usr/local/bin"
             fi
           done
           
           # Install git with git-core support
           if command -v git &> /dev/null; then
-            # Copy git binary
-            sudo cp $(which git) /usr/local/bin/git.real
+            # Copy git binary from /usr/bin
+            sudo cp -f $(which git) /usr/local/bin/git.real
           
             # Copy git-core files
             GIT_EXEC_PATH=$(git --exec-path)
             if [ -d "$GIT_EXEC_PATH" ]; then
-              sudo cp -r "$GIT_EXEC_PATH"/* /usr/local/libexec/git-core/
+              sudo cp -rf "$GIT_EXEC_PATH"/* /usr/local/libexec/git-core/
           
               # Create git wrapper
               sudo tee /usr/local/bin/git << 'EOF'
@@ -222,87 +225,8 @@ jobs:
             fi
           fi
           
-          # Install Node.js and npm
-          if command -v node &> /dev/null; then
-            # Copy node binary
-            sudo cp $(which node) /usr/local/bin/
-            echo "Installed node to /usr/local/bin"
-          
-            # Handle npm installation
-            NPM_PREFIX=$(npm config get prefix)
-            echo "NPM prefix: $NPM_PREFIX"
-          
-            # Create npm directories
-            sudo mkdir -p /usr/local/lib/node_modules
-          
-            # Find npm installation
-            NPM_SOURCE=""
-            for npm_path in "$NPM_PREFIX/lib/node_modules/npm" "/usr/lib/node_modules/npm" "/usr/local/lib/node_modules/npm"; do
-              if [ -d "$npm_path" ]; then
-                NPM_SOURCE="$npm_path"
-                echo "Found npm at: $NPM_SOURCE"
-                break
-              fi
-            done
-          
-            # If no npm found in standard locations, check where npm is actually installed
-            if [ -z "$NPM_SOURCE" ] || [ ! -d "$NPM_SOURCE" ]; then
-              # Get the actual npm script location
-              NPM_BIN=$(which npm)
-              if [ -n "$NPM_BIN" ] && [ -f "$NPM_BIN" ]; then
-                # Read the npm script to find the actual module location
-                NPM_MODULE_PATH=$(grep -E "node.*npm/bin/npm-cli.js" "$NPM_BIN" | sed -E 's/.*"([^"]+\/npm)\/bin\/npm-cli.js".*/\1/')
-                if [ -n "$NPM_MODULE_PATH" ] && [ -d "$NPM_MODULE_PATH" ]; then
-                  NPM_SOURCE="$NPM_MODULE_PATH"
-                  echo "Found npm via script analysis at: $NPM_SOURCE"
-                fi
-              fi
-            fi
-          
-            # Copy npm if found
-            if [ -n "$NPM_SOURCE" ] && [ -d "$NPM_SOURCE" ]; then
-              sudo rm -rf /usr/local/lib/node_modules/npm
-              sudo cp -r "$NPM_SOURCE" /usr/local/lib/node_modules/
-              echo "Copied npm modules to /usr/local/lib/node_modules/"
-          
-              # Create npm and npx wrappers
-              sudo tee /usr/local/bin/npm << 'EOF'
-          #!/bin/bash
-          export NODE_PATH="/usr/local/lib/node_modules"
-          exec "/usr/local/bin/node" "/usr/local/lib/node_modules/npm/bin/npm-cli.js" "$@"
-          EOF
-              sudo chmod +x /usr/local/bin/npm
-          
-              sudo tee /usr/local/bin/npx << 'EOF'
-          #!/bin/bash
-          export NODE_PATH="/usr/local/lib/node_modules"
-          exec "/usr/local/bin/node" "/usr/local/lib/node_modules/npm/bin/npx-cli.js" "$@"
-          EOF
-              sudo chmod +x /usr/local/bin/npx
-              echo "Installed npm and npx to /usr/local/bin"
-            else
-              echo "Warning: Could not find npm modules directory"
-              echo "Attempting alternative installation method..."
-          
-              # Alternative: Just create wrapper scripts pointing to system npm
-              if command -v npm &> /dev/null; then
-                NPM_REAL=$(which npm)
-                sudo cp "$NPM_REAL" /usr/local/bin/npm
-                sudo chmod +x /usr/local/bin/npm
-                echo "Copied npm binary directly to /usr/local/bin"
-              fi
-          
-              if command -v npx &> /dev/null; then
-                NPX_REAL=$(which npx)
-                sudo cp "$NPX_REAL" /usr/local/bin/npx
-                sudo chmod +x /usr/local/bin/npx
-                echo "Copied npx binary directly to /usr/local/bin"
-              fi
-            fi
-          fi
-          
-          # Install FrankenPHP binary (force overwrite)
-          sudo cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp /usr/local/bin/frankenphp
+          # Install FrankenPHP binary
+          sudo cp -f frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp /usr/local/bin/frankenphp
           sudo chmod +x /usr/local/bin/frankenphp
           echo "Installed frankenphp to /usr/local/bin"
           
@@ -313,7 +237,7 @@ jobs:
             if [ -f "$binary" ]; then
               ldd "$binary" | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | while read lib; do
                 if [ -f "$lib" ]; then
-                  sudo cp -v "$lib" /usr/local/lib/frankenphp/
+                  sudo cp -fv "$lib" /usr/local/lib/frankenphp/
                 fi
               done
             fi
@@ -321,7 +245,7 @@ jobs:
           
           # Copy additional common libraries to /usr/local/lib/frankenphp
           for lib in libzip.so* libpng16.so* libjpeg.so* libfreetype.so* libicu*.so* libonig.so* libxml2.so* libxslt.so* libgd.so* libssl.so* libcrypto.so* libcurl.so* libmariadb.so*; do
-            find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/local/lib -name "$lib" -exec sudo cp -v {} /usr/local/lib/frankenphp/ \; 2>/dev/null || true
+            find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/local/lib -name "$lib" -exec sudo cp -fv {} /usr/local/lib/frankenphp/ \; 2>/dev/null || true
           done
           
           # Update ldconfig to include our libraries
@@ -329,7 +253,7 @@ jobs:
           sudo ldconfig
           
           echo "Installation completed successfully!"
-          
+
       - name: Create demo files and archive
         run: |
           # Create a temporary directory for packaging
