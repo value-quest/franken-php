@@ -218,9 +218,9 @@ jobs:
           fi
           
           # Install Node.js and npm (force overwrite)
+          # Node.js is already installed to /usr/local/bin by earlier step
           if command -v node &> /dev/null; then
-            sudo cp $(which node) /usr/local/bin/
-            echo "Installed node to /usr/local/bin"
+            echo "Using existing Node.js installation in /usr/local/bin"
             
             NPM_PREFIX=$(npm config get prefix)
             sudo mkdir -p /usr/local/lib/node_modules
