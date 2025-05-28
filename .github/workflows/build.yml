@@ -320,7 +320,7 @@ jobs:
           EOF
           
           # Create setup script
-          cat > dist/setup-env.sh << 'EOF'
+          cat > dist/install.sh << 'EOF'
           #!/bin/bash
                     #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
@@ -453,7 +453,7 @@ jobs:
             echo "User installation completed! Run: source ~/.bash_profile"
           fi          
           EOF
-          chmod +x dist/setup-env.sh
+          chmod +x dist/install.sh
           
           # Create README
           cat > dist/README.md << 'EOF'
@@ -463,12 +463,12 @@ jobs:
           
           ### System-wide (recommended for servers)
           ```bash
-          sudo ./setup-env.sh
+          sudo ./install.sh
           ```
           
           ### User-only
           ```bash
-          ./setup-env.sh
+          ./install.sh
           source ~/.bash_profile
           ```
           
@@ -577,7 +577,7 @@ jobs:
             ## Quick Install
             ```bash
             tar -xzf frankenphp-linux-amd64-php84.tar.gz
-            sudo ./setup-env.sh     # System-wide (recommended)
+            sudo ./install.sh     # System-wide (recommended)
             ```
             
             ## Quick Start Demo
