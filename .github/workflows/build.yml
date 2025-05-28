@@ -168,16 +168,16 @@ jobs:
           php composer-setup.php --quiet
           rm composer-setup.php
 
-      - name: Install FrankenPHP and tools to /usr/local
+      - name: Package FrankenPHP with libraries
         run: |
           # Create directories
-          sudo mkdir -p /usr/local/lib/frankenphp
-          sudo mkdir -p /usr/local/libexec/git-core
+          mkdir -p dist/lib
+          mkdir -p dist/bin
           
           # Copy PHP shared library
           PHP_LIB_PATH="$(php-config --prefix)/lib/libphp.so"
           if [ -f "$PHP_LIB_PATH" ]; then
-            sudo cp -f "$PHP_LIB_PATH" /usr/local/lib/frankenphp/
+            cp "$PHP_LIB_PATH" dist/lib/
             echo "Copied libphp.so from $PHP_LIB_PATH"
           else
             echo "ERROR: Cannot find libphp.so at $PHP_LIB_PATH"
@@ -185,105 +185,119 @@ jobs:
             exit 1
           fi
           
-          # PHP binaries are already installed to /usr/local/bin by 'make install'
-          echo "PHP binaries already in /usr/local/bin from make install"
+          # Copy PHP binaries
+          PHP_BIN_PATH="$(php-config --prefix)/bin"
+          cp "$PHP_BIN_PATH/php" dist/bin/
+          cp "$PHP_BIN_PATH/php-config" dist/bin/
+          cp "$PHP_BIN_PATH/phpize" dist/bin/
+          cp composer.phar dist/bin/composer
+          chmod +x dist/bin/composer
           
-          # Node.js, npm, npx are already installed to /usr/local/bin by NodeSource
-          echo "Node.js, npm, npx already in /usr/local/bin from NodeSource"
-          
-          # Install composer
-          sudo cp -f composer.phar /usr/local/bin/composer
-          sudo chmod +x /usr/local/bin/composer
-          echo "Installed composer to /usr/local/bin"
-          
-          # Install system tools from /usr/bin to /usr/local/bin
+          # Copy sqlite3, zip, unzip
           for tool in sqlite3 zip unzip; do
             if command -v $tool &> /dev/null; then
-              sudo cp -f $(which $tool) /usr/local/bin/
-              echo "Installed $tool to /usr/local/bin"
+              cp $(which $tool) dist/bin/
+              echo "Copied $tool"
             fi
           done
           
-          # Install git with git-core support
+          # Copy git and helpers
           if command -v git &> /dev/null; then
-            # Copy git binary from /usr/bin
-            sudo cp -f $(which git) /usr/local/bin/git.real
-          
-            # Copy git-core files
+            cp $(which git) dist/bin/
             GIT_EXEC_PATH=$(git --exec-path)
             if [ -d "$GIT_EXEC_PATH" ]; then
-              sudo cp -rf "$GIT_EXEC_PATH"/* /usr/local/libexec/git-core/
-          
-              # Create git wrapper
-              sudo tee /usr/local/bin/git << 'EOF'
+              mkdir -p dist/libexec/git-core
+              cp -r "$GIT_EXEC_PATH"/* dist/libexec/git-core/
+              mv dist/bin/git dist/bin/git.real
+              cat > dist/bin/git << 'EOF'
           #!/bin/bash
-          export GIT_EXEC_PATH="/usr/local/libexec/git-core"
-          exec "/usr/local/bin/git.real" "$@"
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export GIT_EXEC_PATH="$SCRIPT_DIR/../libexec/git-core"
+          exec "$SCRIPT_DIR/git.real" "$@"
           EOF
-              sudo chmod +x /usr/local/bin/git
-              echo "Installed git with git-core support to /usr/local/bin"
+              chmod +x dist/bin/git
             fi
           fi
           
-          # Install FrankenPHP binary
-          sudo cp -f frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp /usr/local/bin/frankenphp
-          sudo chmod +x /usr/local/bin/frankenphp
-          echo "Installed frankenphp to /usr/local/bin"
+          # Copy Node.js and npm
+          if command -v node &> /dev/null; then
+            cp $(which node) dist/bin/
+            NPM_PREFIX=$(npm config get prefix)
+            mkdir -p dist/lib/node_modules
+            if [ -d "$NPM_PREFIX/lib/node_modules/npm" ]; then
+              cp -r "$NPM_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
+            fi
+            cat > dist/bin/npm << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export NODE_PATH="$SCRIPT_DIR/../lib/node_modules"
+          exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npm-cli.js" "$@"
+          EOF
+            chmod +x dist/bin/npm
+            cat > dist/bin/npx << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export NODE_PATH="$SCRIPT_DIR/../lib/node_modules"
+          exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npx-cli.js" "$@"
+          EOF
+            chmod +x dist/bin/npx
+          fi
           
-          # Copy all required shared libraries to /usr/local/lib/frankenphp
-          echo "Installing shared library dependencies..."
-          PHP_BIN_PATH="$(php-config --prefix)/bin"
+          # Copy FrankenPHP binary
+          cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/bin/frankenphp
+          chmod +x dist/bin/frankenphp
+          
+          # Copy all required shared libraries
+          echo "Copying shared library dependencies..."
           for binary in frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp "$PHP_BIN_PATH/php" "$PHP_LIB_PATH"; do
-            if [ -f "$binary" ]; then
-              ldd "$binary" | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | while read lib; do
-                if [ -f "$lib" ]; then
-                  sudo cp -fv "$lib" /usr/local/lib/frankenphp/
-                fi
-              done
-            fi
+            ldd "$binary" | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
           done
           
-          # Copy additional common libraries to /usr/local/lib/frankenphp
+          # Copy additional common libraries
           for lib in libzip.so* libpng16.so* libjpeg.so* libfreetype.so* libicu*.so* libonig.so* libxml2.so* libxslt.so* libgd.so* libssl.so* libcrypto.so* libcurl.so* libmariadb.so*; do
-            find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/local/lib -name "$lib" -exec sudo cp -fv {} /usr/local/lib/frankenphp/ \; 2>/dev/null || true
+            find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/local/lib -name "$lib" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
           done
           
-          # Update ldconfig to include our libraries
-          echo "/usr/local/lib/frankenphp" | sudo tee /etc/ld.so.conf.d/frankenphp.conf
-          sudo ldconfig
+          # Create self-contained wrapper scripts
+          mv dist/bin/php dist/bin/php.real
+          cat > dist/bin/php << 'EOF'
+          #!/bin/bash
+          # Resolve symlinks to get the actual script location
+          SOURCE="${BASH_SOURCE[0]}"
+          while [ -h "$SOURCE" ]; do
+            DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+            SOURCE="$(readlink "$SOURCE")"
+            [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+          done
+          SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
           
-          echo "Installation completed successfully!"
-
-      - name: Create demo files and archive
-        run: |
-          # Create a temporary directory for packaging
-          mkdir -p package
+          export LD_LIBRARY_PATH="$SCRIPT_DIR/../lib:$LD_LIBRARY_PATH"
+          exec "$SCRIPT_DIR/php.real" "$@"
+          EOF
+          chmod +x dist/bin/php
           
-          # Copy all installed binaries from /usr/local/bin
-          sudo mkdir -p package/usr/local/bin
-          sudo cp -rf /usr/local/bin/* package/usr/local/bin/
+          mv dist/bin/frankenphp dist/bin/frankenphp.real
+          cat > dist/bin/frankenphp << 'EOF'
+          #!/bin/bash
+          # Resolve symlinks to get the actual script location
+          SOURCE="${BASH_SOURCE[0]}"
+          while [ -h "$SOURCE" ]; do
+            DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+            SOURCE="$(readlink "$SOURCE")"
+            [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+          done
+          SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
           
-          # Copy all libraries from /usr/local/lib/frankenphp
-          sudo mkdir -p package/usr/local/lib/frankenphp
-          sudo cp -rf /usr/local/lib/frankenphp/* package/usr/local/lib/frankenphp/
-          
-          # Copy git-core files
-          if [ -d "/usr/local/libexec/git-core" ]; then
-            sudo mkdir -p package/usr/local/libexec/git-core
-            sudo cp -rf /usr/local/libexec/git-core/* package/usr/local/libexec/git-core/
-          fi
-          
-          # Copy ldconfig configuration
-          if [ -f "/etc/ld.so.conf.d/frankenphp.conf" ]; then
-            sudo mkdir -p package/etc/ld.so.conf.d
-            sudo cp /etc/ld.so.conf.d/frankenphp.conf package/etc/ld.so.conf.d/
-          fi
+          export LD_LIBRARY_PATH="$SCRIPT_DIR/../lib:$LD_LIBRARY_PATH"
+          exec "$SCRIPT_DIR/frankenphp.real" "$@"
+          EOF
+          chmod +x dist/bin/frankenphp
           
           # Create index.php
-          cat > package/index.php << EOF
+          cat > dist/index.php << EOF
           <?php
           echo "FrankenPHP v${FRANKENPHP_VERSION} with PHP " . PHP_VERSION . "\\n";
-          echo "Composer: " . trim(shell_exec("composer --version")) . "\\n\\n";
+          echo "Composer: " . trim(shell_exec(\$_SERVER['PWD'] . "/bin/composer --version")) . "\\n\\n";
           echo "PHP Extensions:\\n";
           \$extensions = get_loaded_extensions();
           sort(\$extensions);
@@ -292,7 +306,7 @@ jobs:
           EOF
           
           # Create Caddyfile
-          cat > package/Caddyfile << 'EOF'
+          cat > dist/Caddyfile << 'EOF'
           {
               frankenphp
               order php_server before file_server
@@ -305,75 +319,107 @@ jobs:
           }
           EOF
           
-          # Create installation script
-          cat > package/install.sh << 'EOF'
+          # Create setup script
+          cat > dist/setup-env.sh << 'EOF'
           #!/bin/bash
-          set -e
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+          PROFILE="$HOME/.bash_profile"
+          MARKER="# FrankenPHP environment setup"
           
-          echo "Installing FrankenPHP distribution..."
+          if [ "$EUID" -eq 0 ]; then
+          echo "Installing system-wide..."
+          # Override the config file
+          echo "$SCRIPT_DIR/lib" > /etc/ld.so.conf.d/frankenphp.conf
+          ldconfig 2>&1 | grep -v "is not a symbolic link" || true
           
-          # Copy binaries
-          if [ -d "usr/local/bin" ]; then
-            sudo cp -rf usr/local/bin/* /usr/local/bin/
-            echo "✓ Installed binaries to /usr/local/bin"
+          # Handle git special case first
+          if [ -f "$SCRIPT_DIR/bin/git" ] && [ -f "$SCRIPT_DIR/bin/git.real" ]; then
+          # We need to install both git and git.real
+          echo "Installing git wrapper and real binary..."
+          
+          # Handle git.real first
+          if [ -d "/usr/local/bin/git.real" ]; then
+          rm -rf "/usr/local/bin/git.real"
+          fi
+          ln -sf "$SCRIPT_DIR/bin/git.real" "/usr/local/bin/git.real"
+          
+          # Then handle git wrapper
+          if [ -d "/usr/local/bin/git" ]; then
+          rm -rf "/usr/local/bin/git"
           fi
           
-          # Copy libraries
-          if [ -d "usr/local/lib/frankenphp" ]; then
-            sudo mkdir -p /usr/local/lib/frankenphp
-            sudo cp -rf usr/local/lib/frankenphp/* /usr/local/lib/frankenphp/
-            echo "✓ Installed libraries to /usr/local/lib/frankenphp"
+          # Create a modified git wrapper that uses absolute paths
+          cat > "/usr/local/bin/git" << EOL
+          #!/bin/bash
+          export GIT_EXEC_PATH="$SCRIPT_DIR/libexec/git-core"
+          exec "/usr/local/bin/git.real" "\$@"
+          EOL
+          chmod +x "/usr/local/bin/git"
+          echo "Git installation completed with absolute paths"
           fi
           
-          # Copy git-core files
-          if [ -d "usr/local/libexec/git-core" ]; then
-            sudo mkdir -p /usr/local/libexec/git-core
-            sudo cp -rf usr/local/libexec/git-core/* /usr/local/libexec/git-core/
-            echo "✓ Installed git-core to /usr/local/libexec/git-core"
+          # Now handle the rest of the binaries
+          for binary in frankenphp php composer node npm npx sqlite3 zip unzip; do
+          if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
+          # Remove existing target if it's a directory (cannot be symlinked over)
+          if [ -d "/usr/local/bin/$binary" ]; then
+          rm -rf "/usr/local/bin/$binary"
+          fi
+          # Force create symlink (-f) to override any existing symlinks or files
+          ln -sf "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
+          fi
+          done
+          
+          echo "System-wide installation completed!"
+          else
+          # For user installation, remove the existing block if present
+          if grep -q "$MARKER" "$PROFILE" 2>/dev/null; then
+          # Remove existing FrankenPHP setup block
+          sed -i.bak "/^$MARKER/,/^# End of FrankenPHP environment setup/d" "$PROFILE"
+          echo "Removed previous installation from $PROFILE"
           fi
           
-          # Install ldconfig configuration
-          if [ -f "etc/ld.so.conf.d/frankenphp.conf" ]; then
-            sudo cp etc/ld.so.conf.d/frankenphp.conf /etc/ld.so.conf.d/
-            sudo ldconfig
-            echo "✓ Updated ldconfig"
+          # Add new block
+          cat >> "$PROFILE" << EOL
+          $MARKER
+          export PATH="$SCRIPT_DIR/bin:\$PATH"
+          export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:\$LD_LIBRARY_PATH"
+          # End of FrankenPHP environment setup
+          EOL
+            echo "User installation completed! Run: source ~/.bash_profile"
           fi
-          
-          echo "Installation completed successfully!"
-          echo ""
-          echo "Quick test:"
-          echo "  frankenphp run"
-          echo "  # Visit http://localhost:8080"
           EOF
-          
-          chmod +x package/install.sh
+          chmod +x dist/setup-env.sh
           
           # Create README
-          cat > package/README.md << 'EOF'
+          cat > dist/README.md << 'EOF'
           # FrankenPHP Distribution
-          
-          This distribution contains FrankenPHP with all required binaries and libraries.
           
           ## Installation
           
-          Extract and run the installer:
+          ### System-wide (recommended for servers)
           ```bash
-          tar -xzf frankenphp-linux-amd64-phpXX.tar.gz
-          cd frankenphp-*
-          sudo ./install.sh
+          sudo ./setup-env.sh
+          ```
+          
+          ### User-only
+          ```bash
+          ./setup-env.sh
+          source ~/.bash_profile
           ```
           
           ## Quick Start Demo
           
-          After installation, test FrankenPHP:
+          After installation, test FrankenPHP immediately:
           ```bash
+          cd /path/to/frankenphp-directory
           frankenphp run
           # Visit http://localhost:8080 to see phpinfo
           ```
           
           The included `Caddyfile` serves the demo `index.php` file.
           
-          ## What's Included (installed to /usr/local/bin)
+          ## Included Tools
           - FrankenPHP, PHP 8.x, Composer
           - Node.js 20.x LTS, npm, npx
           - Git, sqlite3, zip/unzip
@@ -383,33 +429,12 @@ jobs:
           
           ## Laravel Octane Support
           Includes ext-pcntl required for Laravel Octane process management.
-          
-          ## Libraries
-          All required libraries are installed in `/usr/local/lib/frankenphp/` and configured via ldconfig.
-          
-          ## Directory Structure
-          ```
-          usr/local/bin/          # All executables
-          usr/local/lib/frankenphp/  # Shared libraries
-          usr/local/libexec/git-core/  # Git core files
-          etc/ld.so.conf.d/       # Library configuration
-          install.sh              # Installation script
-          index.php               # Demo file
-          Caddyfile              # Demo server config
-          ```
           EOF
           
-          # Change ownership to current user for packaging
-          sudo chown -R $(id -u):$(id -g) package
-          
           # Create archive
-          cd package
+          cd dist
           tar -czf ../frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz .
           cd ..
-          
-          # Show what's in the archive
-          echo "Archive contents:"
-          tar -tzf frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz | head -20
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
@@ -419,7 +444,7 @@ jobs:
           retention-days: 7
 
   create-release:
-    needs: [ check-new-release, build-php ]
+    needs: [check-new-release, build-php]
     if: ${{ always() && needs.build-php.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
@@ -488,7 +513,7 @@ jobs:
             ## Quick Install
             ```bash
             tar -xzf frankenphp-linux-amd64-php84.tar.gz
-            # Files are pre-installed to /usr/local/bin - ready to use!
+            sudo ./setup-env.sh     # System-wide (recommended)
             ```
             
             ## Quick Start Demo
@@ -501,14 +526,16 @@ jobs:
             - **PHP 8.4**: `frankenphp-linux-amd64-php84.tar.gz`
             
             ## What's Included
-            - FrankenPHP, PHP 8.x with all common extensions, Composer (pre-installed in /usr/local/bin)
-            - Node.js 20.x LTS, npm, npx (pre-installed in /usr/local/bin)
-            - Git, sqlite3, zip/unzip (pre-installed in /usr/local/bin)
-            - All libraries in /usr/local/lib/frankenphp with ldconfig setup
+            - FrankenPHP, PHP 8.x with all common extensions, Composer
+            - Node.js 20.x LTS, npm, npx
+            - Git, sqlite3, zip/unzip
+            - Self-contained binaries (work with Supervisor!)
             - ext-pcntl for Laravel Octane support
             
-            ## No Installation Required
-            Everything is pre-installed to `/usr/local/bin` during the GitHub Actions build.
-            Just extract and use immediately - perfect for containers and CI/CD!
+            ## Two Install Methods
+            1. **System-wide** (`sudo`): Creates `/usr/local/bin` symlinks, works everywhere
+            2. **User-only**: Modifies `~/.bash_profile`, requires sourcing
+            
+            System-wide recommended for production servers.
         env:
           GITHUB_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
