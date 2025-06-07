@@ -27,7 +27,7 @@ jobs:
       - name: Get latest release from GitHub API
         id: get-latest
         run: |
-          LATEST_VERSION=$(curl -s https://api.github.com/repos/dunglas/frankenphp/releases/latest | jq -r '.tag_name' | sed 's/v//')
+          LATEST_VERSION=$(curl -s https://api.github.com/repos/php/frankenphp/releases/latest | jq -r '.tag_name' | sed 's/v//')
           echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
       - name: Check if there's a new version
