@@ -322,7 +322,6 @@ jobs:
           # Create setup script
           cat > dist/install.sh << 'EOF'
           #!/bin/bash
-                    #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
           PROFILE="$HOME/.bash_profile"
           MARKER="# FrankenPHP environment setup"
@@ -436,14 +435,55 @@ jobs:
           echo "Libraries installed to: /usr/local/lib"
           echo "Binaries installed to: /usr/local/bin"
           else
-          # For user installation, remove the existing block if present
+          # For user installation, ensure .bash_profile sources other config files
+          if [ ! -f "$PROFILE" ]; then
+            # Create .bash_profile with proper sourcing if it doesn't exist
+            cat > "$PROFILE" << EOL
+          # Source .profile if it exists
+          if [ -f ~/.profile ]; then
+              . ~/.profile
+          fi
+          
+          # Source .bashrc if it exists
+          if [ -f ~/.bashrc ]; then
+              . ~/.bashrc
+          fi
+          EOL
+            echo "Created $PROFILE with proper sourcing"
+          else
+            # Check if .bash_profile already sources .profile and .bashrc
+            if ! grep -q "\.profile" "$PROFILE" || ! grep -q "\.bashrc" "$PROFILE"; then
+              # Backup existing file
+              cp "$PROFILE" "${PROFILE}.backup"
+              
+              # Add sourcing at the beginning if not present
+              TEMP_FILE=$(mktemp)
+              cat > "$TEMP_FILE" << EOL
+          # Source .profile if it exists
+          if [ -f ~/.profile ]; then
+              . ~/.profile
+          fi
+          
+          # Source .bashrc if it exists
+          if [ -f ~/.bashrc ]; then
+              . ~/.bashrc
+          fi
+          
+          EOL
+              cat "$PROFILE" >> "$TEMP_FILE"
+              mv "$TEMP_FILE" "$PROFILE"
+              echo "Updated $PROFILE to source .profile and .bashrc"
+            fi
+          fi
+          
+          # Remove the existing FrankenPHP block if present
           if grep -q "$MARKER" "$PROFILE" 2>/dev/null; then
           # Remove existing FrankenPHP setup block
           sed -i.bak "/^$MARKER/,/^# End of FrankenPHP environment setup/d" "$PROFILE"
-          echo "Removed previous installation from $PROFILE"
+          echo "Removed previous FrankenPHP installation from $PROFILE"
           fi
           
-          # Add new block
+          # Add new FrankenPHP block
           cat >> "$PROFILE" << EOL
           $MARKER
           export PATH="$SCRIPT_DIR/bin:\$PATH"
