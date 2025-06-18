@@ -59,7 +59,12 @@ jobs:
 
   build-php:
     needs: check-new-release
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'pull_request' || needs.check-new-release.outputs.has_new_version == 'true' }}
+    if: ${{
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'schedule' && needs.check-new-release.outputs.has_new_version == 'true')
+    }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
