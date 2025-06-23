@@ -307,12 +307,8 @@ jobs:
           
           # Create Caddyfile
           cat > dist/Caddyfile << 'EOF'
-          {
-              frankenphp
-              order php_server before file_server
-          }
           
-          localhost:8080 {
+          localhost:8000 {
               root * .
               encode gzip
               php_server
@@ -455,7 +451,7 @@ jobs:
             if ! grep -q "\.profile" "$PROFILE" || ! grep -q "\.bashrc" "$PROFILE"; then
               # Backup existing file
               cp "$PROFILE" "${PROFILE}.backup"
-              
+          
               # Add sourcing at the beginning if not present
               TEMP_FILE=$(mktemp)
               cat > "$TEMP_FILE" << EOL
@@ -518,7 +514,7 @@ jobs:
           ```bash
           cd /path/to/frankenphp-directory
           frankenphp run
-          # Visit http://localhost:8080 to see phpinfo
+          # Visit http://localhost:8000 to see phpinfo
           ```
           
           The included `Caddyfile` serves the demo `index.php` file.
