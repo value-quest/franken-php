@@ -144,7 +144,7 @@ jobs:
 
       - name: Get FrankenPHP
         run: |
-          curl -L https://github.com/dunglas/frankenphp/archive/refs/tags/v${FRANKENPHP_VERSION}.tar.gz | tar xz
+          curl -L https://github.com/php/frankenphp/archive/refs/tags/v${FRANKENPHP_VERSION}.tar.gz | tar xz
 
       - name: Build FrankenPHP with rpath
         working-directory: frankenphp-${{ env.FRANKENPHP_VERSION }}/caddy/frankenphp
