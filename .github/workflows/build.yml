@@ -137,7 +137,8 @@ jobs:
             --enable-intl \
             --with-sqlite3 \
             --with-zlib \
-            --enable-pcntl
+            --enable-pcntl \
+            --enable-soap
           make -j$(nproc)
           sudo make install
           sudo ldconfig
