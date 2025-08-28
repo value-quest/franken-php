@@ -316,12 +316,133 @@ jobs:
           }
           EOF
           
-          # Create setup script
+          # Create enhanced install script with upgrade support
           cat > dist/install.sh << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
           PROFILE="$HOME/.bash_profile"
           MARKER="# FrankenPHP environment setup"
+          
+          # Function to detect if this is an upgrade
+          detect_upgrade() {
+              if [ "$EUID" -eq 0 ]; then
+                  # System-wide installation
+                  if [ -f "/usr/local/bin/frankenphp" ]; then
+                      echo "Existing system-wide FrankenPHP installation detected"
+                      return 0
+                  fi
+              else
+                  # User installation
+                  if grep -q "$MARKER" "$PROFILE" 2>/dev/null; then
+                      echo "Existing user FrankenPHP installation detected"
+                      return 0
+                  fi
+              fi
+              return 1
+          }
+          
+          # Function to get installed version
+          get_installed_version() {
+              if [ "$EUID" -eq 0 ]; then
+                  if [ -f "/usr/local/bin/frankenphp" ]; then
+                      /usr/local/bin/frankenphp version 2>/dev/null | head -1 || echo "unknown"
+                  fi
+              else
+                  # For user installations, try to find frankenphp in existing PATH
+                  if command -v frankenphp &> /dev/null; then
+                      frankenphp version 2>/dev/null | head -1 || echo "unknown"
+                  fi
+              fi
+          }
+          
+          # Function to backup current installation
+          backup_installation() {
+              local backup_dir="/tmp/frankenphp-backup-$(date +%Y%m%d-%H%M%S)"
+              echo "Creating backup at: $backup_dir"
+          
+              if [ "$EUID" -eq 0 ]; then
+                  mkdir -p "$backup_dir"/{bin,lib,libexec}
+          
+                  # Backup binaries
+                  for binary in frankenphp php composer node npm npx git sqlite3 zip unzip php-config phpize; do
+                      if [ -f "/usr/local/bin/$binary" ]; then
+                          cp "/usr/local/bin/$binary" "$backup_dir/bin/" 2>/dev/null || true
+                      fi
+                      if [ -f "/usr/local/bin/$binary.real" ]; then
+                          cp "/usr/local/bin/$binary.real" "$backup_dir/bin/" 2>/dev/null || true
+                      fi
+                  done
+          
+                  # Backup key libraries (just the FrankenPHP-specific ones)
+                  for lib in libphp.so*; do
+                      if [ -f "/usr/local/lib/$lib" ]; then
+                          cp "/usr/local/lib/$lib" "$backup_dir/lib/" 2>/dev/null || true
+                      fi
+                  done
+          
+                  # Backup Node.js modules and git libexec if they exist
+                  if [ -d "/usr/local/lib/node_modules" ]; then
+                      cp -r "/usr/local/lib/node_modules" "$backup_dir/lib/" 2>/dev/null || true
+                  fi
+          
+                  if [ -d "/usr/local/libexec/git-core" ]; then
+                      cp -r "/usr/local/libexec/git-core" "$backup_dir/libexec/" 2>/dev/null || true
+                  fi
+          
+                  echo "System backup created at: $backup_dir"
+              else
+                  # For user installations, just backup the profile
+                  if [ -f "$PROFILE" ]; then
+                      cp "$PROFILE" "${PROFILE}.frankenphp-backup-$(date +%Y%m%d-%H%M%S)"
+                      echo "Profile backup created: ${PROFILE}.frankenphp-backup-$(date +%Y%m%d-%H%M%S)"
+                  fi
+              fi
+          
+              echo "$backup_dir" > /tmp/frankenphp-last-backup
+          }
+          
+          # Function to clean old installation
+          clean_old_installation() {
+              if [ "$EUID" -eq 0 ]; then
+                  echo "Cleaning old system-wide installation..."
+          
+                  # Remove FrankenPHP-specific binaries
+                  for binary in frankenphp php composer node npm npx git sqlite3 zip unzip php-config phpize; do
+                      rm -f "/usr/local/bin/$binary" "/usr/local/bin/$binary.real"
+                  done
+          
+                  # Clean up old libraries more selectively
+                  # Remove PHP and Node.js specific libraries, but keep system libraries
+                  rm -f /usr/local/lib/libphp.so*
+                  rm -rf /usr/local/lib/node_modules
+                  rm -rf /usr/local/libexec/git-core
+          
+                  echo "Old installation cleaned"
+              fi
+          }
+          
+          # Main installation logic
+          if detect_upgrade; then
+              echo "=== UPGRADE MODE ==="
+              echo "Current version: $(get_installed_version)"
+              echo "New version: FrankenPHP with PHP $(cd "$SCRIPT_DIR" && ./bin/php.real --version | head -1 | cut -d' ' -f2)"
+              echo ""
+              read -p "This will upgrade your existing FrankenPHP installation. Continue? [y/N] " -n 1 -r
+              echo
+              if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                  echo "Upgrade cancelled"
+                  exit 1
+              fi
+          
+              backup_installation
+              if [ "$EUID" -eq 0 ]; then
+                  clean_old_installation
+              fi
+          else
+              echo "=== NEW INSTALLATION ==="
+              echo "Installing: FrankenPHP with PHP $(cd "$SCRIPT_DIR" && ./bin/php.real --version | head -1 | cut -d' ' -f2)"
+              echo ""
+          fi
           
           if [ "$EUID" -eq 0 ]; then
           echo "Installing system-wide..."
@@ -393,8 +514,8 @@ jobs:
           fi
           done
           
-          # Handle other binaries (composer, node, npm, npx, sqlite3, zip, unzip)
-          for binary in composer node npm npx sqlite3 zip unzip; do
+          # Handle other binaries (composer, node, npm, npx, sqlite3, zip, unzip, php-config, phpize)
+          for binary in composer node npm npx sqlite3 zip unzip php-config phpize; do
           if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
             # Remove existing target if it's a directory
             if [ -d "/usr/local/bin/$binary" ]; then
@@ -428,9 +549,25 @@ jobs:
           fi
           done
           
-          echo "System-wide installation completed!"
+          echo ""
+          echo "=== INSTALLATION COMPLETED ==="
           echo "Libraries installed to: /usr/local/lib"
           echo "Binaries installed to: /usr/local/bin"
+          
+          if [ -f "/tmp/frankenphp-last-backup" ]; then
+            echo "Previous installation backed up to: $(cat /tmp/frankenphp-last-backup)"
+          fi
+          
+          echo ""
+          echo "Installed versions:"
+          /usr/local/bin/frankenphp version 2>/dev/null || echo "FrankenPHP: installed"
+          /usr/local/bin/php --version 2>/dev/null | head -1 || echo "PHP: installed"
+          /usr/local/bin/composer --version 2>/dev/null || echo "Composer: installed"
+          
+          if command -v node &> /dev/null; then
+            /usr/local/bin/node --version 2>/dev/null || echo "Node.js: installed"
+          fi
+          
           else
           # For user installation, ensure .bash_profile sources other config files
           if [ ! -f "$PROFILE" ]; then
@@ -487,156 +624,35 @@ jobs:
           export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:\$LD_LIBRARY_PATH"
           # End of FrankenPHP environment setup
           EOL
-            echo "User installation completed! Run: source ~/.bash_profile"
-          fi          
-          EOF
-          chmod +x dist/install.sh
           
-          # Create README
-          cat > dist/README.md << 'EOF'
-          # FrankenPHP Distribution
+          echo ""
+          echo "=== INSTALLATION COMPLETED ==="
+          echo "User installation completed! Run: source ~/.bash_profile"
           
-          ## Installation
+          if [ -f "/tmp/frankenphp-last-backup" ]; then
+            echo "Previous installation backed up"
+          fi
           
-          ### System-wide (recommended for servers)
-          ```bash
-          sudo ./install.sh
-          ```
+          echo ""
+          echo "To test immediately:"
+          echo "source ~/.bash_profile"
+          echo "frankenphp version"
+          fi
           
-          ### User-only
-          ```bash
-          ./install.sh
-          source ~/.bash_profile
-          ```
-          
-          ## Quick Start Demo
-          
-          After installation, test FrankenPHP immediately:
-          ```bash
-          cd /path/to/frankenphp-directory
-          frankenphp run
-          # Visit http://localhost:8000 to see phpinfo
-          ```
-          
-          The included `Caddyfile` serves the demo `index.php` file.
-          
-          ## Included Tools
-          - FrankenPHP, PHP 8.x, Composer
-          - Node.js 20.x LTS, npm, npx
-          - Git, sqlite3, zip/unzip
-          
-          ## PHP Extensions
-          Core, DOM, MB, XML, PDO, MySQL, SQLite, GD, Zlib, Curl, OpenSSL, BCMath, Intl, PCNTL, and more.
-          
-          ## Laravel Octane Support
-          Includes ext-pcntl required for Laravel Octane process management.
-          EOF
-          
-          # Create archive
-          cd dist
-          tar -czf ../frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz .
-          cd ..
-
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: frankenphp-${{ env.PHP_SHORT }}
-          path: frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz
-          retention-days: 7
-
-  create-release:
-    needs: [check-new-release, build-php]
-    if: ${{ always() && needs.build-php.result == 'success' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    env:
-      FRANKENPHP_VERSION: ${{ needs.check-new-release.outputs.latest_version }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-artifacts/
-
-      - name: Prepare release files
-        run: |
-          mkdir -p release-files
-          find release-artifacts -name "*.tar.gz" -exec mv {} release-files/ \;
-          echo "Files to be released:"
-          ls -la release-files/
-
-      - name: Check for existing release tag
-        id: check-tag
-        run: |
-          STABLE_TAG="v${{ env.FRANKENPHP_VERSION }}"
-          echo "stable_tag=$STABLE_TAG" >> $GITHUB_OUTPUT
-          
-          if git ls-remote --tags origin refs/tags/$STABLE_TAG | grep -q $STABLE_TAG; then
-            echo "tag_exists=true" >> $GITHUB_OUTPUT
+          echo ""
+          echo "=== ROLLBACK INSTRUCTIONS ==="
+          if [ "$EUID" -eq 0 ]; then
+            echo "To rollback system-wide installation:"
+            echo "1. sudo rm -rf /usr/local/bin/{frankenphp,php,composer,node,npm,npx,git,sqlite3,zip,unzip,php-config,phpize}"
+            echo "2. sudo rm -rf /usr/local/bin/{frankenphp.real,php.real,git.real}"
+            echo "3. sudo rm -rf /usr/local/lib/node_modules /usr/local/libexec/git-core"
+            echo "4. sudo rm -f /usr/local/lib/libphp.so*"
+            echo "5. sudo rm -f /etc/ld.so.conf.d/frankenphp.conf && sudo ldconfig"
+            if [ -f "/tmp/frankenphp-last-backup" ]; then
+              echo "6. Restore from backup: $(cat /tmp/frankenphp-last-backup)"
+            fi
           else
-            echo "tag_exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Delete existing release
-        if: steps.check-tag.outputs.tag_exists == 'true'
-        run: |
-          STABLE_TAG="${{ steps.check-tag.outputs.stable_tag }}"
-          
-          RELEASE_ID=$(curl -s -H "Authorization: token ${{ secrets.ORG_RELEASE_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$STABLE_TAG" | \
-            jq -r '.id')
-          
-          if [ "$RELEASE_ID" != "null" ]; then
-            curl -s -X DELETE -H "Authorization: token ${{ secrets.ORG_RELEASE_TOKEN }}" \
-              "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID"
-          fi
-          
-          git tag -d $STABLE_TAG || true
-          git push --delete origin $STABLE_TAG || true
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: release-files/*
-          tag_name: ${{ steps.check-tag.outputs.stable_tag }}
-          name: FrankenPHP v${{ env.FRANKENPHP_VERSION }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          body: |
-            FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP 8.3 and 8.4
-            
-            ## Quick Install
-            ```bash
-            tar -xzf frankenphp-linux-amd64-php84.tar.gz
-            sudo ./install.sh     # System-wide (recommended)
-            ```
-            
-            ## Quick Start Demo
-            ```bash
-            frankenphp run   # Starts server on http://localhost:8080
-            ```
-            
-            ## Downloads
-            - **PHP 8.3**: `frankenphp-linux-amd64-php83.tar.gz`
-            - **PHP 8.4**: `frankenphp-linux-amd64-php84.tar.gz`
-            
-            ## What's Included
-            - FrankenPHP, PHP 8.x with all common extensions, Composer
-            - Node.js 20.x LTS, npm, npx
-            - Git, sqlite3, zip/unzip
-            - Self-contained binaries (work with Supervisor!)
-            - ext-pcntl for Laravel Octane support
-            
-            ## Two Install Methods
-            1. **System-wide** (`sudo`): Creates `/usr/local/bin` symlinks, works everywhere
-            2. **User-only**: Modifies `~/.bash_profile`, requires sourcing
-            
-            System-wide recommended for production servers.
-        env:
-          GITHUB_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
+            echo "To rollback user installation:"
+            echo "1. Remove FrankenPHP lines from ~/.bash_profile"
+            echo "2. source ~/.bash_profile"
+            if [ -f "${PROFILE}.frankenphp-backup-"*
