@@ -317,12 +317,38 @@ jobs:
           EOF
           
           # Create setup script
-          # Create enhanced setup script with upgrade support
           cat > dist/install.sh << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
           PROFILE="$HOME/.bash_profile"
           MARKER="# FrankenPHP environment setup"
+          
+          # Function to check if FrankenPHP processes are running
+          check_running_processes() {
+              local running_processes=$(pgrep -f frankenphp 2>/dev/null || true)
+              if [ -n "$running_processes" ]; then
+                  echo "WARNING: FrankenPHP processes are currently running:"
+                  ps aux | grep -v grep | grep frankenphp || true
+                  echo ""
+                  echo "These processes should be stopped before upgrading to prevent issues."
+                  echo "For Supervisor: sudo supervisorctl stop all"
+                  echo "Manual kill: sudo pkill -f frankenphp"
+                  echo ""
+                  read -p "Stop FrankenPHP processes automatically? [y/N] " -n 1 -r
+                  echo
+                  if [[ $REPLY =~ ^[Yy]$ ]]; then
+                      echo "Stopping FrankenPHP processes..."
+                      sudo supervisorctl stop all 2>/dev/null || true
+                      sleep 2
+                      sudo pkill -f frankenphp 2>/dev/null || true
+                      sleep 1
+                      echo "Processes stopped."
+                  else
+                      echo "Please stop FrankenPHP processes manually and run the installer again."
+                      exit 1
+                  fi
+              fi
+          }
           
           # Function to detect if this is an upgrade
           detect_upgrade() {
@@ -356,39 +382,79 @@ jobs:
                   [ -f "$PROFILE" ] && cp "$PROFILE" "${PROFILE}.backup-$(date +%Y%m%d-%H%M%S)"
               fi
               echo "$backup_dir" > /tmp/frankenphp-last-backup
+              echo "Backup created successfully."
+          }
+          
+          # Function to show current versions
+          show_versions() {
+              echo "=== CURRENT VERSIONS ==="
+              if [ "$EUID" -eq 0 ]; then
+                  /usr/local/bin/frankenphp version 2>/dev/null | head -1 || echo "FrankenPHP: not found"
+                  /usr/local/bin/php --version 2>/dev/null | head -1 || echo "PHP: not found"
+                  /usr/local/bin/node --version 2>/dev/null | sed 's/^/Node.js: /' || echo "Node.js: not found"
+              else
+                  command -v frankenphp >/dev/null && frankenphp version 2>/dev/null | head -1 || echo "FrankenPHP: not found"
+                  command -v php >/dev/null && php --version 2>/dev/null | head -1 || echo "PHP: not found"
+                  command -v node >/dev/null && echo "Node.js: $(node --version)" || echo "Node.js: not found"
+              fi
+              echo ""
+              echo "=== NEW VERSIONS (from package) ==="
+              echo "FrankenPHP: $(cd "$SCRIPT_DIR" && ./bin/frankenphp.real version 2>/dev/null | head -1 || echo 'included')"
+              echo "PHP: $(cd "$SCRIPT_DIR" && ./bin/php.real --version 2>/dev/null | head -1 || echo 'included')"
+              echo "Node.js: $(cd "$SCRIPT_DIR" && ./bin/node --version 2>/dev/null || echo 'included')"
+              echo ""
           }
           
           # Main installation logic
           if detect_upgrade; then
               echo "=== UPGRADE MODE ==="
-              read -p "Upgrade existing FrankenPHP installation? [y/N] " -n 1 -r
+              show_versions
+              echo "⚠️  WARNING: This will:"
+              echo "   - Stop running FrankenPHP processes"
+              echo "   - Replace system binaries (may affect SSH if using FrankenPHP)"
+              echo "   - Require Supervisor restart after completion"
+              echo ""
+          
+              # Check for running processes first
+              check_running_processes
+          
+              read -p "Continue with upgrade? [y/N] " -n 1 -r
               echo
               [[ ! $REPLY =~ ^[Yy]$ ]] && echo "Upgrade cancelled" && exit 1
+          
               backup_installation
           
               if [ "$EUID" -eq 0 ]; then
                   echo "Cleaning old installation..."
+                  # Remove old binaries more carefully
                   for binary in frankenphp php composer node npm npx git sqlite3 zip unzip php-config phpize; do
-                      rm -f "/usr/local/bin/$binary" "/usr/local/bin/$binary.real"
+                      rm -f "/usr/local/bin/$binary" "/usr/local/bin/$binary.real" 2>/dev/null || true
                   done
-                  rm -f /usr/local/lib/libphp.so*
-                  rm -rf /usr/local/lib/node_modules /usr/local/libexec/git-core
+                  rm -f /usr/local/lib/libphp.so* 2>/dev/null || true
+                  rm -rf /usr/local/lib/node_modules /usr/local/libexec/git-core 2>/dev/null || true
+                  echo "Old installation cleaned."
               fi
           else
               echo "=== NEW INSTALLATION ==="
+              show_versions
           fi
           
           if [ "$EUID" -eq 0 ]; then
             echo "Installing system-wide..."
             mkdir -p /usr/local/lib /usr/local/libexec
+          
+            # Copy libraries first
+            echo "Installing libraries..."
             cp -r "$SCRIPT_DIR/lib"/* /usr/local/lib/
             [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec"/* /usr/local/libexec/
           
+            # Update ldconfig
             echo "/usr/local/lib" > /etc/ld.so.conf.d/frankenphp.conf
             ldconfig 2>&1 | grep -v "is not a symbolic link" || true
           
-            # Install git with wrapper
+            # Install git with wrapper (if present)
             if [ -f "$SCRIPT_DIR/bin/git.real" ]; then
+              echo "Installing git..."
               cp "$SCRIPT_DIR/bin/git.real" "/usr/local/bin/git.real"
               chmod +x "/usr/local/bin/git.real"
               cat > "/usr/local/bin/git" << 'EOL'
@@ -400,6 +466,7 @@ jobs:
             fi
           
             # Install binaries that need LD_LIBRARY_PATH
+            echo "Installing PHP and FrankenPHP..."
             for binary in frankenphp php; do
               if [ -f "$SCRIPT_DIR/bin/$binary.real" ]; then
                 cp "$SCRIPT_DIR/bin/$binary.real" "/usr/local/bin/$binary.real"
@@ -413,11 +480,19 @@ jobs:
               fi
             done
           
+            # Install Node.js first (needed for npm/npx)
+            if [ -f "$SCRIPT_DIR/bin/node" ]; then
+              echo "Installing Node.js..."
+              cp "$SCRIPT_DIR/bin/node" "/usr/local/bin/node"
+              chmod +x "/usr/local/bin/node"
+            fi
+          
             # Install other binaries
-            for binary in composer node npm npx sqlite3 zip unzip php-config phpize; do
+            echo "Installing additional tools..."
+            for binary in composer npm npx sqlite3 zip unzip php-config phpize; do
               if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
                 if [ "$binary" = "npm" ] || [ "$binary" = "npx" ]; then
-                  # Node.js wrapper scripts
+                  # Node.js wrapper scripts (only if node is available)
                   if [ -f "/usr/local/bin/node" ]; then
                     cat > "/usr/local/bin/$binary" << EOL
           #!/bin/bash
@@ -427,21 +502,34 @@ jobs:
                     chmod +x "/usr/local/bin/$binary"
                   fi
                 else
+                  # Direct copy for other tools
                   cp "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
                   chmod +x "/usr/local/bin/$binary"
                 fi
               fi
             done
           
-            echo "System-wide installation completed!"
-            echo "Installed versions:"
-            /usr/local/bin/frankenphp version 2>/dev/null || echo "FrankenPHP: installed"
-            /usr/local/bin/php --version 2>/dev/null | head -1 || echo "PHP: installed"
-            /usr/local/bin/composer --version 2>/dev/null || echo "Composer: installed"
-            /usr/local/bin/node --version 2>/dev/null || echo "Node.js: installed"
-            [ -f "/tmp/frankenphp-last-backup" ] && echo "Backup created at: $(cat /tmp/frankenphp-last-backup)"
+            # Final status
+            echo ""
+            echo "=== INSTALLATION COMPLETED ==="
+            echo "Libraries: /usr/local/lib"
+            echo "Binaries: /usr/local/bin"
+            echo ""
+            echo "✅ Installed versions:"
+            /usr/local/bin/frankenphp version 2>/dev/null | head -1 || echo "FrankenPHP: ⚠️  error getting version"
+            /usr/local/bin/php --version 2>/dev/null | head -1 || echo "PHP: ⚠️  error getting version"
+            /usr/local/bin/composer --version 2>/dev/null | head -1 || echo "Composer: ⚠️  error getting version"
+            /usr/local/bin/node --version 2>/dev/null | sed 's/^/Node.js: /' || echo "Node.js: ⚠️  error getting version"
+          
+            [ -f "/tmp/frankenphp-last-backup" ] && echo "" && echo "📦 Backup: $(cat /tmp/frankenphp-last-backup)"
+          
+            echo ""
+            echo "🔄 IMPORTANT: Restart services that use FrankenPHP:"
+            echo "   sudo supervisorctl reload    # Reload Supervisor config"
+            echo "   sudo supervisorctl start all # Start all services"
+            echo ""
           else
-            # User installation
+            # User installation (unchanged)
             [ ! -f "$PROFILE" ] && cat > "$PROFILE" << 'EOL'
           if [ -f ~/.profile ]; then . ~/.profile; fi
           if [ -f ~/.bashrc ]; then . ~/.bashrc; fi
