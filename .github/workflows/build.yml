@@ -96,8 +96,11 @@ jobs:
 
       - name: Install Node.js
         run: |
+          sudo apt-get remove -y nodejs npm
           curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
           sudo apt-get install -y nodejs
+          echo "Installed Node.js version: $(node --version)"
+          echo "Node.js location: $(which node)"
 
       - name: Get PHP ${{ env.PHP_VERSION }}
         run: |
@@ -220,14 +223,15 @@ jobs:
             fi
           fi
           
-          # Copy Node.js and npm
           if command -v node &> /dev/null; then
+            echo "Copying Node.js $(node --version) from $(which node)"
             cp $(which node) dist/bin/
             NPM_PREFIX=$(npm config get prefix)
             mkdir -p dist/lib/node_modules
             if [ -d "$NPM_PREFIX/lib/node_modules/npm" ]; then
               cp -r "$NPM_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
             fi
+            # Create npm wrapper
             cat > dist/bin/npm << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -235,6 +239,7 @@ jobs:
           exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npm-cli.js" "$@"
           EOF
             chmod +x dist/bin/npm
+            # Create npx wrapper  
             cat > dist/bin/npx << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -327,52 +332,45 @@ jobs:
           check_running_processes() {
               local running_processes=$(pgrep -f frankenphp 2>/dev/null || true)
               if [ -n "$running_processes" ]; then
-                  echo "WARNING: FrankenPHP processes are currently running:"
+                  echo "⚠️  WARNING: FrankenPHP processes are currently running:"
                   ps aux | grep -v grep | grep frankenphp || true
                   echo ""
-                  echo "These processes should be stopped before upgrading to prevent issues."
-                  echo "For Supervisor: sudo supervisorctl stop all"
-                  echo "Manual kill: sudo pkill -f frankenphp"
+                  echo "These MUST be stopped before upgrading to prevent file locks and crashes."
                   echo ""
-                  read -p "Stop FrankenPHP processes automatically? [y/N] " -n 1 -r
+                  read -p "Stop FrankenPHP processes now? [y/N] " -n 1 -r
                   echo
                   if [[ $REPLY =~ ^[Yy]$ ]]; then
-                      echo "Stopping FrankenPHP processes..."
+                      echo "Stopping services..."
                       sudo supervisorctl stop all 2>/dev/null || true
+                      sleep 3
+                      sudo pkill -9 -f frankenphp 2>/dev/null || true
                       sleep 2
-                      sudo pkill -f frankenphp 2>/dev/null || true
-                      sleep 1
-                      echo "Processes stopped."
+                      echo "✅ Processes stopped."
                   else
-                      echo "Please stop FrankenPHP processes manually and run the installer again."
+                      echo "❌ Please stop FrankenPHP processes manually first:"
+                      echo "   sudo supervisorctl stop all"
+                      echo "   sudo pkill -f frankenphp"
                       exit 1
                   fi
               fi
           }
           
-          # Function to detect if this is an upgrade
+          # Function to detect upgrade
           detect_upgrade() {
               if [ "$EUID" -eq 0 ]; then
-                  if [ -f "/usr/local/bin/frankenphp" ]; then
-                      echo "Existing system-wide FrankenPHP installation detected"
-                      return 0
-                  fi
+                  [ -f "/usr/local/bin/frankenphp" ] && return 0
               else
-                  if grep -q "$MARKER" "$PROFILE" 2>/dev/null; then
-                      echo "Existing user FrankenPHP installation detected"
-                      return 0
-                  fi
+                  grep -q "$MARKER" "$PROFILE" 2>/dev/null && return 0
               fi
               return 1
           }
           
-          # Function to backup current installation
           backup_installation() {
               local backup_dir="/tmp/frankenphp-backup-$(date +%Y%m%d-%H%M%S)"
-              echo "Creating backup at: $backup_dir"
+              echo "📦 Creating backup at: $backup_dir"
           
               if [ "$EUID" -eq 0 ]; then
-                  mkdir -p "$backup_dir"/{bin,lib,libexec}
+                  mkdir -p "$backup_dir"/{bin,lib}
                   for binary in frankenphp php composer node npm npx git sqlite3 zip unzip php-config phpize; do
                       [ -f "/usr/local/bin/$binary" ] && cp "/usr/local/bin/$binary" "$backup_dir/bin/" 2>/dev/null || true
                       [ -f "/usr/local/bin/$binary.real" ] && cp "/usr/local/bin/$binary.real" "$backup_dir/bin/" 2>/dev/null || true
@@ -382,91 +380,159 @@ jobs:
                   [ -f "$PROFILE" ] && cp "$PROFILE" "${PROFILE}.backup-$(date +%Y%m%d-%H%M%S)"
               fi
               echo "$backup_dir" > /tmp/frankenphp-last-backup
-              echo "Backup created successfully."
           }
           
-          # Function to show current versions
-          show_versions() {
-              echo "=== CURRENT VERSIONS ==="
-              if [ "$EUID" -eq 0 ]; then
-                  /usr/local/bin/frankenphp version 2>/dev/null | head -1 || echo "FrankenPHP: not found"
-                  /usr/local/bin/php --version 2>/dev/null | head -1 || echo "PHP: not found"
-                  /usr/local/bin/node --version 2>/dev/null | sed 's/^/Node.js: /' || echo "Node.js: not found"
+          restart_supervisor() {
+              echo ""
+              echo "🔄 === SUPERVISOR MANAGEMENT ==="
+          
+              # Check if supervisor is installed and running
+              if ! command -v supervisorctl &> /dev/null; then
+                  echo "ℹ️  Supervisor not found - skipping service restart"
+                  return 0
+              fi
+          
+              if ! systemctl is-active --quiet supervisor 2>/dev/null; then
+                  echo "⚠️  Supervisor service is not running"
+                  read -p "Start Supervisor service? [y/N] " -n 1 -r
+                  echo
+                  if [[ $REPLY =~ ^[Yy]$ ]]; then
+                      sudo systemctl start supervisor
+                      echo "✅ Supervisor service started"
+                  else
+                      echo "ℹ️  Skipping Supervisor management"
+                      return 0
+                  fi
+              fi
+          
+              # Show current status
+              echo "📊 Current Supervisor status:"
+              sudo supervisorctl status | head -5
+              echo ""
+          
+              # Ask user what they want to do
+              echo "Choose an option:"
+              echo "1) Restart Supervisor service (recommended for upgrades)"
+              echo "2) Reload configuration and restart programs"
+              echo "3) Just start all programs" 
+              echo "4) Skip - I'll manage Supervisor manually"
+              echo ""
+              read -p "Select option [1-4]: " -n 1 -r
+              echo ""
+          
+              case $REPLY in
+                  1)
+                      echo "🔄 Restarting Supervisor service..."
+                      sudo service supervisor restart
+                      sleep 3
+                      echo "✅ Supervisor service restarted"
+                      ;;
+                  2)
+                      echo "🔄 Reloading Supervisor configuration..."
+                      sudo supervisorctl reload
+                      sleep 2
+                      echo "🔄 Starting all programs..."
+                      sudo supervisorctl start all
+                      echo "✅ Configuration reloaded and programs started"
+                      ;;
+                  3)
+                      echo "🔄 Starting all programs..."
+                      sudo supervisorctl start all
+                      echo "✅ Programs started"
+                      ;;
+                  4|*)
+                      echo "ℹ️  Skipping automatic Supervisor management"
+                      echo ""
+                      echo "💡 Manual commands:"
+                      echo "   sudo service supervisor restart        # Full restart (recommended)"
+                      echo "   sudo supervisorctl reload && sudo supervisorctl start all"
+                      return 0
+                      ;;
+              esac
+          
+              # Show final status
+              echo ""
+              echo "📊 Final Supervisor status:"
+              sudo supervisorctl status
+          
+              # Check if any services failed to start
+              local failed_services=$(sudo supervisorctl status | grep -v RUNNING | grep -v "unix://" | wc -l)
+              if [ "$failed_services" -gt 0 ]; then
+                  echo ""
+                  echo "⚠️  Some services may not be running properly."
+                  echo "💡 Check logs: sudo supervisorctl tail -f <program_name>"
               else
-                  command -v frankenphp >/dev/null && frankenphp version 2>/dev/null | head -1 || echo "FrankenPHP: not found"
-                  command -v php >/dev/null && php --version 2>/dev/null | head -1 || echo "PHP: not found"
-                  command -v node >/dev/null && echo "Node.js: $(node --version)" || echo "Node.js: not found"
+                  echo ""
+                  echo "✅ All services appear to be running correctly!"
+              fi
+          }          
+          
+          # Show versions
+          show_versions() {
+              echo "=== VERSION COMPARISON ==="
+              if [ "$EUID" -eq 0 ]; then
+                  echo "Current FrankenPHP: $(/usr/local/bin/frankenphp version 2>/dev/null | head -1 || echo 'not installed')"
+                  echo "Current PHP: $(/usr/local/bin/php --version 2>/dev/null | head -1 || echo 'not installed')"
+                  echo "Current Node.js: $(/usr/local/bin/node --version 2>/dev/null || echo 'not installed')"
+              else
+                  echo "Current FrankenPHP: $(command -v frankenphp >/dev/null && frankenphp version 2>/dev/null | head -1 || echo 'not installed')"
+                  echo "Current PHP: $(command -v php >/dev/null && php --version 2>/dev/null | head -1 || echo 'not installed')"
+                  echo "Current Node.js: $(command -v node >/dev/null && node --version || echo 'not installed')"
               fi
               echo ""
-              echo "=== NEW VERSIONS (from package) ==="
-              echo "FrankenPHP: $(cd "$SCRIPT_DIR" && ./bin/frankenphp.real version 2>/dev/null | head -1 || echo 'included')"
-              echo "PHP: $(cd "$SCRIPT_DIR" && ./bin/php.real --version 2>/dev/null | head -1 || echo 'included')"
-              echo "Node.js: $(cd "$SCRIPT_DIR" && ./bin/node --version 2>/dev/null || echo 'included')"
+              echo "New FrankenPHP: $(cd "$SCRIPT_DIR" && ./bin/frankenphp.real version 2>/dev/null | head -1)"
+              echo "New PHP: $(cd "$SCRIPT_DIR" && ./bin/php.real --version 2>/dev/null | head -1)"
+              echo "New Node.js: $(cd "$SCRIPT_DIR" && ./bin/node --version 2>/dev/null)"
               echo ""
           }
           
-          # Main installation logic
+          # Main logic
           if detect_upgrade; then
-              echo "=== UPGRADE MODE ==="
+              echo "🔄 === UPGRADE MODE ==="
               show_versions
-              echo "⚠️  WARNING: This will:"
-              echo "   - Stop running FrankenPHP processes"
-              echo "   - Replace system binaries (may affect SSH if using FrankenPHP)"
-              echo "   - Require Supervisor restart after completion"
+          
+              echo "⚠️  IMPORTANT WARNINGS:"
+              echo "   • This process may briefly disconnect SSH sessions"
+              echo "   • All FrankenPHP processes will be stopped"
+              echo "   • Supervisor services will need manual restart after completion"
               echo ""
           
-              # Check for running processes first
               check_running_processes
           
-              read -p "Continue with upgrade? [y/N] " -n 1 -r
+              read -p "Continue with potentially disruptive upgrade? [y/N] " -n 1 -r
               echo
               [[ ! $REPLY =~ ^[Yy]$ ]] && echo "Upgrade cancelled" && exit 1
           
               backup_installation
           
               if [ "$EUID" -eq 0 ]; then
-                  echo "Cleaning old installation..."
-                  # Remove old binaries more carefully
+                  echo "🧹 Cleaning old installation..."
+                  # Use a more atomic approach to prevent SSH disruption
                   for binary in frankenphp php composer node npm npx git sqlite3 zip unzip php-config phpize; do
-                      rm -f "/usr/local/bin/$binary" "/usr/local/bin/$binary.real" 2>/dev/null || true
+                      [ -f "/usr/local/bin/$binary" ] && mv "/usr/local/bin/$binary" "/usr/local/bin/$binary.old" 2>/dev/null || true
+                      [ -f "/usr/local/bin/$binary.real" ] && mv "/usr/local/bin/$binary.real" "/usr/local/bin/$binary.real.old" 2>/dev/null || true
                   done
-                  rm -f /usr/local/lib/libphp.so* 2>/dev/null || true
-                  rm -rf /usr/local/lib/node_modules /usr/local/libexec/git-core 2>/dev/null || true
-                  echo "Old installation cleaned."
               fi
           else
-              echo "=== NEW INSTALLATION ==="
+              echo "🆕 === NEW INSTALLATION ==="
               show_versions
           fi
           
           if [ "$EUID" -eq 0 ]; then
-            echo "Installing system-wide..."
+            echo "📦 Installing system-wide..."
+          
+            # Create directories
             mkdir -p /usr/local/lib /usr/local/libexec
           
-            # Copy libraries first
-            echo "Installing libraries..."
+            # Install libraries
             cp -r "$SCRIPT_DIR/lib"/* /usr/local/lib/
             [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec"/* /usr/local/libexec/
           
-            # Update ldconfig
+            # Update library cache
             echo "/usr/local/lib" > /etc/ld.so.conf.d/frankenphp.conf
-            ldconfig 2>&1 | grep -v "is not a symbolic link" || true
+            ldconfig 2>&1 >/dev/null || true
           
-            # Install git with wrapper (if present)
-            if [ -f "$SCRIPT_DIR/bin/git.real" ]; then
-              echo "Installing git..."
-              cp "$SCRIPT_DIR/bin/git.real" "/usr/local/bin/git.real"
-              chmod +x "/usr/local/bin/git.real"
-              cat > "/usr/local/bin/git" << 'EOL'
-          #!/bin/bash
-          export GIT_EXEC_PATH="/usr/local/libexec/git-core"
-          exec "/usr/local/bin/git.real" "$@"
-          EOL
-              chmod +x "/usr/local/bin/git"
-            fi
-          
-            # Install binaries that need LD_LIBRARY_PATH
-            echo "Installing PHP and FrankenPHP..."
+            # Install binaries with wrapper scripts
             for binary in frankenphp php; do
               if [ -f "$SCRIPT_DIR/bin/$binary.real" ]; then
                 cp "$SCRIPT_DIR/bin/$binary.real" "/usr/local/bin/$binary.real"
@@ -480,56 +546,61 @@ jobs:
               fi
             done
           
-            # Install Node.js first (needed for npm/npx)
-            if [ -f "$SCRIPT_DIR/bin/node" ]; then
-              echo "Installing Node.js..."
-              cp "$SCRIPT_DIR/bin/node" "/usr/local/bin/node"
-              chmod +x "/usr/local/bin/node"
-            fi
-          
-            # Install other binaries
-            echo "Installing additional tools..."
-            for binary in composer npm npx sqlite3 zip unzip php-config phpize; do
+            # Install other tools
+            for binary in composer node npm npx sqlite3 zip unzip php-config phpize; do
               if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
-                if [ "$binary" = "npm" ] || [ "$binary" = "npx" ]; then
-                  # Node.js wrapper scripts (only if node is available)
-                  if [ -f "/usr/local/bin/node" ]; then
-                    cat > "/usr/local/bin/$binary" << EOL
-          #!/bin/bash
-          export NODE_PATH="/usr/local/lib/node_modules"
-          exec "/usr/local/bin/node" "/usr/local/lib/node_modules/npm/bin/$binary-cli.js" "\$@"
-          EOL
-                    chmod +x "/usr/local/bin/$binary"
-                  fi
-                else
-                  # Direct copy for other tools
-                  cp "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
-                  chmod +x "/usr/local/bin/$binary"
-                fi
+                cp "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
+                chmod +x "/usr/local/bin/$binary"
               fi
             done
           
-            # Final status
-            echo ""
-            echo "=== INSTALLATION COMPLETED ==="
-            echo "Libraries: /usr/local/lib"
-            echo "Binaries: /usr/local/bin"
-            echo ""
-            echo "✅ Installed versions:"
-            /usr/local/bin/frankenphp version 2>/dev/null | head -1 || echo "FrankenPHP: ⚠️  error getting version"
-            /usr/local/bin/php --version 2>/dev/null | head -1 || echo "PHP: ⚠️  error getting version"
-            /usr/local/bin/composer --version 2>/dev/null | head -1 || echo "Composer: ⚠️  error getting version"
-            /usr/local/bin/node --version 2>/dev/null | sed 's/^/Node.js: /' || echo "Node.js: ⚠️  error getting version"
+            # Install git wrapper if present
+            if [ -f "$SCRIPT_DIR/bin/git.real" ]; then
+              cp "$SCRIPT_DIR/bin/git.real" "/usr/local/bin/git.real"
+              chmod +x "/usr/local/bin/git.real"
+              cat > "/usr/local/bin/git" << 'EOL'
+          #!/bin/bash
+          export GIT_EXEC_PATH="/usr/local/libexec/git-core"
+          exec "/usr/local/bin/git.real" "$@"
+          EOL
+              chmod +x "/usr/local/bin/git"
+            fi
           
-            [ -f "/tmp/frankenphp-last-backup" ] && echo "" && echo "📦 Backup: $(cat /tmp/frankenphp-last-backup)"
+            # Clean up old files
+            rm -f /usr/local/bin/*.old /usr/local/bin/*.real.old 2>/dev/null || true
           
             echo ""
-            echo "🔄 IMPORTANT: Restart services that use FrankenPHP:"
-            echo "   sudo supervisorctl reload    # Reload Supervisor config"
-            echo "   sudo supervisorctl start all # Start all services"
+            echo "✅ === INSTALLATION COMPLETED ==="
+            echo "📍 Libraries: /usr/local/lib"
+            echo "📍 Binaries: /usr/local/bin"
             echo ""
+            echo "🔍 Installed versions:"
+            /usr/local/bin/frankenphp version 2>/dev/null | head -1 | sed 's/^/   /'
+            /usr/local/bin/php --version 2>/dev/null | head -1 | sed 's/^/   /'
+            /usr/local/bin/node --version 2>/dev/null | sed 's/^/   Node.js: /' || echo "   Node.js: error"
+            /usr/local/bin/composer --version 2>/dev/null | head -1 | sed 's/^/   /'
+          
+            [ -f "/tmp/frankenphp-last-backup" ] && echo "" && echo "📦 Backup saved: $(cat /tmp/frankenphp-last-backup)"
+          
+            # Call the supervisor restart function
+            restart_supervisor
+          
+            echo ""
+            echo "🔄 === NEXT STEPS ==="
+            echo "1. Restart Supervisor to reload services:"
+            echo "   sudo service supervisor restart"
+            echo ""
+            echo "2. Or restart individual services:"
+            echo "   sudo supervisorctl reload"
+            echo "   sudo supervisorctl start all"
+            echo ""
+            echo "3. Verify Node.js version (should be v22.x.x):"
+            echo "   /usr/local/bin/node --version"
+            echo ""
+            echo "💡 If SSH was disconnected, reconnect and check installation."
+          
           else
-            # User installation (unchanged)
+            # User installation
             [ ! -f "$PROFILE" ] && cat > "$PROFILE" << 'EOL'
           if [ -f ~/.profile ]; then . ~/.profile; fi
           if [ -f ~/.bashrc ]; then . ~/.bashrc; fi
@@ -544,7 +615,8 @@ jobs:
           # End of FrankenPHP environment setup
           EOL
           
-            echo "User installation completed! Run: source ~/.bash_profile"
+            echo "✅ User installation completed!"
+            echo "Run: source ~/.bash_profile"
           fi
           EOF
           chmod +x dist/install.sh
