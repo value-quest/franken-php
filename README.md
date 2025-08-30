@@ -8,27 +8,53 @@ No further installation is needed to run your PHP app!
 1. Extract the tarball:
    ```bash
    tar -xzf frankenphp-linux-amd64-php8*.tar.gz
+   cd frankenphp-*
    ```
 
 2. Install (choose one):
-   
+
    **System-wide installation (recommended for servers):**
    ```bash
    sudo ./install.sh
    ```
-   
+
    **User installation (for development):**
    ```bash
    ./install.sh
    source ~/.bash_profile
    ```
 
+## Updates
+
+For existing installations, use the update script instead of install.sh:
+
+```bash
+# Extract new version
+tar -xzf frankenphp-linux-amd64-php8*.tar.gz
+cd frankenphp-*
+
+# Update existing installation
+sudo ./update.sh     # System-wide
+./update.sh          # User installation
+```
+
+**SSH Warning**: If connected via SSH, you may be disconnected during library replacement. This is normal - the update completes automatically. Reconnect and restart supervisor manually: `sudo service supervisor restart`
+
+## Installation Scripts
+
+- **install.sh** - For new installations only. Detects existing installations and redirects to update.sh
+- **update.sh** - For updating existing installations. Includes automatic service management:
+    - Stops FrankenPHP processes gracefully
+    - Creates backup before updating
+    - Replaces all binaries and libraries
+    - Restarts Supervisor services automatically (if SSH doesn't disconnect)
+
 ## Quick Start
 
 After installation, test immediately:
 ```bash
 frankenphp run
-# Visit http://localhost:8080
+# Visit http://localhost:8000
 ```
 
 ## Available Commands
@@ -95,7 +121,8 @@ npx create-react-app my-app
 ├── libexec/          # Git helper programs
 ├── Caddyfile         # Example server configuration
 ├── index.php         # PHP info demo
-├── setup-env.sh      # Installation script
+├── install.sh        # New installation script
+├── update.sh         # Update existing installation script
 └── README.md
 ```
 
@@ -131,7 +158,7 @@ This distribution includes full support for Laravel Octane with:
 
 ## System-wide Installation Benefits
 
-With system-wide installation (`sudo ./setup-env.sh`):
+With system-wide installation (`sudo ./install.sh`):
 - Works with process managers (Supervisor, systemd)
 - Available for all users
 - No environment setup needed
@@ -145,6 +172,21 @@ directory=/path/to/project
 autostart=true
 autorestart=true
 ```
+
+## Production Server Updates
+
+For production servers using Supervisor, the recommended update process:
+
+1. Extract new version
+2. Run update script (may disconnect SSH)
+3. Reconnect and verify versions
+4. Restart supervisor: `sudo service supervisor restart`
+
+The update script automatically:
+- Creates backups in `/tmp/frankenphp-backup-TIMESTAMP`
+- Stops running FrankenPHP processes
+- Replaces all binaries including Node.js
+- Handles library dependencies
 
 ## Custom Configuration
 
@@ -168,12 +210,17 @@ example.com {
 - For system installation: Commands should work immediately
 
 ### Port Conflicts
-- Default port is 8080
+- Default port is 8000 (changed from 8080)
 - Change in Caddyfile: `localhost:9090`
+
+### Update Issues
+- Check for completion marker: `cat /tmp/frankenphp-update-complete`
+- Restore from backup if needed: `/tmp/frankenphp-backup-TIMESTAMP`
+- For SSH disconnections during updates, reconnect and verify with `php -v`
 
 ### Library Errors
 - The distribution includes self-contained wrappers that handle library paths automatically
-- For system-wide issues, reinstall with: `sudo ./setup-env.sh`
+- For system-wide issues, reinstall with: `sudo ./install.sh`
 
 ## Development Tools
 
@@ -203,6 +250,8 @@ unzip project.zip
 ### System-wide
 ```bash
 sudo rm -f /usr/local/bin/{frankenphp,php,composer,node,npm,npx,git,sqlite3,zip,unzip}
+sudo rm -f /usr/local/bin/*.real
+sudo rm -rf /usr/local/lib/node_modules /usr/local/libexec/git-core
 sudo rm -f /etc/ld.so.conf.d/frankenphp.conf
 sudo ldconfig
 ```

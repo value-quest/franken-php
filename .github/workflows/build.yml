@@ -322,15 +322,141 @@ jobs:
           }
           EOF
 
-      # Load scripts from external files to avoid hitting GitHub's expression limit
-      - name: Create installation scripts
+      # Create simple update script (replaces install.sh and update.sh)
+      - name: Create update script
         run: |
-          # Create install.sh from template
-          cat scripts/install-template.sh | envsubst > dist/install.sh
-          chmod +x dist/install.sh
+          cat > dist/update.sh << 'EOF'
+          #!/bin/bash
+          # update.sh - Clean reinstall script for FrankenPHP
           
-          # Create update.sh from template  
-          cat scripts/update-template.sh | envsubst > dist/update.sh
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+          
+          # Force all output to stderr (unbuffered)
+          exec 1>&2
+          
+          # Function to show versions
+          show_versions() {
+              echo "=== NEW VERSIONS ==="
+              echo "  FrankenPHP: $(cd "$SCRIPT_DIR" && LD_LIBRARY_PATH="$SCRIPT_DIR/lib" ./bin/frankenphp.real version 2>/dev/null | head -1 || echo 'included')"
+              echo "  PHP: $(cd "$SCRIPT_DIR" && LD_LIBRARY_PATH="$SCRIPT_DIR/lib" ./bin/php.real --version 2>/dev/null | head -1 || echo 'included')"
+              echo "  Node.js: $(cd "$SCRIPT_DIR" && ./bin/node --version 2>/dev/null || echo 'included')"
+              echo "  Composer: $(cd "$SCRIPT_DIR" && LD_LIBRARY_PATH="$SCRIPT_DIR/lib" ./bin/composer --version 2>/dev/null | head -1 || echo 'included')"
+              echo ""
+          }
+          
+          # Stop all processes
+          stop_services() {
+              echo "Stopping FrankenPHP processes..."
+              pkill -u "$USER" -f frankenphp 2>/dev/null || true
+              if command -v supervisorctl >/dev/null 2>&1; then
+                  sudo supervisorctl stop all 2>/dev/null || true
+              fi
+              sleep 3
+              echo "Processes stopped"
+          }
+          
+          # Remove everything
+          remove_everything() {
+              echo "Removing all FrankenPHP installations..."
+              rm -rf "$HOME/bin" "$HOME/lib" "$HOME/libexec"
+              sudo rm -f /usr/local/bin/{frankenphp,php,composer,node,npm,npx,git,sqlite3,zip,unzip}
+              sudo rm -f /usr/local/bin/*.real
+              sudo rm -rf /usr/local/lib/node_modules /usr/local/libexec/git-core
+              sudo rm -f /usr/local/lib/libphp.so*
+              sudo rm -f /etc/ld.so.conf.d/frankenphp.conf
+              sudo ldconfig 2>/dev/null || true
+              echo "Old installations removed"
+          }
+          
+          # Install fresh
+          install_fresh() {
+              echo "Installing fresh to user directory..."
+              cp -r "$SCRIPT_DIR/bin" "$HOME/"
+              cp -r "$SCRIPT_DIR/lib" "$HOME/"
+              [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec" "$HOME/"
+              chmod +x "$HOME/bin"/*
+              echo "Fresh installation completed"
+          }
+          
+          # Update bash profile
+          update_profile() {
+              local profile="$HOME/.bash_profile"
+              local marker="# FrankenPHP environment setup"
+          
+              if [ -f "$profile" ] && grep -q "$marker" "$profile"; then
+                  sed -i.bak "/^$marker/,/^# End of FrankenPHP environment setup/d" "$profile"
+              fi
+          
+              [ ! -f "$profile" ] && cat > "$profile" << 'EOFPROFILE'
+          if [ -f ~/.profile ]; then . ~/.profile; fi
+          if [ -f ~/.bashrc ]; then . ~/.bashrc; fi
+          EOFPROFILE
+          
+              cat >> "$profile" << EOFPROFILE
+          $marker
+          export PATH="$HOME/bin:\$PATH"
+          export LD_LIBRARY_PATH="$HOME/lib:\$LD_LIBRARY_PATH"
+          # End of FrankenPHP environment setup
+          EOFPROFILE
+          
+              echo "Profile updated"
+          }
+          
+          # Restart supervisor
+          restart_supervisor() {
+              if command -v supervisorctl >/dev/null 2>&1; then
+                  echo "Restarting Supervisor..."
+                  sudo service supervisor restart
+                  sleep 2
+                  sudo supervisorctl status
+              else
+                  echo "Supervisor not found - skipping restart"
+              fi
+          }
+          
+          # Main execution
+          main() {
+              echo "FrankenPHP Update (Clean Reinstall)"
+              echo "==================================="
+          
+              if [ ! -f "$SCRIPT_DIR/bin/frankenphp.real" ]; then
+                  echo "Error: Cannot find frankenphp.real in $SCRIPT_DIR/bin/"
+                  echo "Make sure you're running this from the extracted FrankenPHP directory"
+                  exit 1
+              fi
+          
+              show_versions
+          
+              echo "This will:"
+              echo "  - Stop all FrankenPHP processes"
+              echo "  - Remove ALL existing installations (user + system)"
+              echo "  - Install fresh to ~/bin, ~/lib, ~/libexec"
+              echo "  - Update ~/.bash_profile"
+              echo "  - Restart Supervisor"
+              echo ""
+          
+              printf "Continue? [y/N] "
+              read -r REPLY
+              if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
+                  echo "Cancelled"
+                  exit 1
+              fi
+          
+              stop_services
+              remove_everything
+              install_fresh
+              update_profile
+              restart_supervisor
+          
+              echo ""
+              echo "UPDATE COMPLETED"
+              echo ""
+              echo "Run: source ~/.bash_profile"
+              echo "Then test: php -v && node -v && frankenphp version"
+          }
+          
+          main "$@"
+          EOF
           chmod +x dist/update.sh
 
       - name: Create README
