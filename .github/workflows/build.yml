@@ -96,7 +96,7 @@ jobs:
 
       - name: Install Node.js
         run: |
-          curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+          curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
           sudo apt-get install -y nodejs
 
       - name: Get PHP ${{ env.PHP_VERSION }}
@@ -348,7 +348,7 @@ jobs:
           stop_services() {
               echo "Stopping FrankenPHP processes..."
               pkill -u "$USER" -f frankenphp 2>/dev/null || true
-          
+              
               if command -v supervisorctl >/dev/null 2>&1; then
                   if [ "$EUID" -eq 0 ]; then
                       # Running with sudo - can control supervisor directly
@@ -367,7 +367,7 @@ jobs:
           remove_everything() {
               echo "Removing all FrankenPHP installations..."
               rm -rf "$HOME/bin" "$HOME/lib" "$HOME/libexec"
-          
+              
               # Only remove system-wide installation if running with sudo
               if [ "$EUID" -eq 0 ]; then
                   rm -f /usr/local/bin/{frankenphp,php,composer,node,npm,npx,git,sqlite3,zip,unzip}
@@ -385,9 +385,20 @@ jobs:
           # Install fresh
           install_fresh() {
               echo "Installing fresh to user directory..."
-              cp -r "$SCRIPT_DIR/bin" "$HOME/"
-              cp -r "$SCRIPT_DIR/lib" "$HOME/"
-              [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec" "$HOME/"
+              
+              # First copy to temporary locations to avoid deleting source before copying
+              cp -r "$SCRIPT_DIR/bin" "$HOME/bin.new"
+              cp -r "$SCRIPT_DIR/lib" "$HOME/lib.new"
+              [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec" "$HOME/libexec.new"
+              
+              # Remove old directories
+              rm -rf "$HOME/bin" "$HOME/lib" "$HOME/libexec"
+              
+              # Move new directories to final locations
+              mv "$HOME/bin.new" "$HOME/bin"
+              mv "$HOME/lib.new" "$HOME/lib"
+              [ -d "$HOME/libexec.new" ] && mv "$HOME/libexec.new" "$HOME/libexec"
+              
               chmod +x "$HOME/bin"/*
               echo "Fresh installation completed"
           }
@@ -396,23 +407,23 @@ jobs:
           update_profile() {
               local profile="$HOME/.bash_profile"
               local marker="# FrankenPHP environment setup"
-          
+              
               if [ -f "$profile" ] && grep -q "$marker" "$profile"; then
                   sed -i.bak "/^$marker/,/^# End of FrankenPHP environment setup/d" "$profile"
               fi
-          
+              
               [ ! -f "$profile" ] && cat > "$profile" << 'EOFPROFILE'
           if [ -f ~/.profile ]; then . ~/.profile; fi
           if [ -f ~/.bashrc ]; then . ~/.bashrc; fi
           EOFPROFILE
-          
+              
               cat >> "$profile" << EOFPROFILE
           $marker
           export PATH="$HOME/bin:\$PATH"
           export LD_LIBRARY_PATH="$HOME/lib:\$LD_LIBRARY_PATH"
           # End of FrankenPHP environment setup
           EOFPROFILE
-          
+              
               echo "Profile updated"
           }
           
@@ -438,15 +449,15 @@ jobs:
           main() {
               echo "FrankenPHP Update (Clean Reinstall)"
               echo "==================================="
-          
+              
               if [ ! -f "$SCRIPT_DIR/bin/frankenphp.real" ]; then
                   echo "Error: Cannot find frankenphp.real in $SCRIPT_DIR/bin/"
                   echo "Make sure you're running this from the extracted FrankenPHP directory"
                   exit 1
               fi
-          
+              
               show_versions
-          
+              
               echo "This will:"
               echo "  - Stop all FrankenPHP processes"
               echo "  - Remove ALL existing installations (user + system)"
@@ -454,20 +465,20 @@ jobs:
               echo "  - Update ~/.bash_profile"
               echo "  - Restart Supervisor"
               echo ""
-          
+              
               printf "Continue? [y/N] "
               read -r REPLY
               if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
                   echo "Cancelled"
                   exit 1
               fi
-          
+              
               stop_services
               remove_everything
               install_fresh
               update_profile
               restart_supervisor
-          
+              
               echo ""
               echo "UPDATE COMPLETED"
               echo ""
