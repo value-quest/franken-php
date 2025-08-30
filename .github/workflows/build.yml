@@ -222,26 +222,59 @@ jobs:
           
           # Copy Node.js and npm
           if command -v node &> /dev/null; then
+            echo "Packaging Node.js..."
             cp $(which node) dist/bin/
             NPM_PREFIX=$(npm config get prefix)
             mkdir -p dist/lib/node_modules
             if [ -d "$NPM_PREFIX/lib/node_modules/npm" ]; then
+              echo "Copying npm modules..."
               cp -r "$NPM_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
             fi
+            
+            # Create robust npm wrapper
             cat > dist/bin/npm << 'EOF'
           #!/bin/bash
-          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          # Resolve symlinks to get the actual script location
+          SOURCE="${BASH_SOURCE[0]}"
+          while [ -h "$SOURCE" ]; do
+            DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+            SOURCE="$(readlink "$SOURCE")"
+            [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+          done
+          SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+          
           export NODE_PATH="$SCRIPT_DIR/../lib/node_modules"
-          exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npm-cli.js" "$@"
+          if [ -f "$SCRIPT_DIR/../lib/node_modules/npm/bin/npm-cli.js" ]; then
+            exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npm-cli.js" "$@"
+          else
+            echo "Error: npm not found in package" >&2
+            exit 1
+          fi
           EOF
             chmod +x dist/bin/npm
+            
+            # Create robust npx wrapper  
             cat > dist/bin/npx << 'EOF'
           #!/bin/bash
-          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          # Resolve symlinks to get the actual script location
+          SOURCE="${BASH_SOURCE[0]}"
+          while [ -h "$SOURCE" ]; do
+            DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+            SOURCE="$(readlink "$SOURCE")"
+            [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+          done
+          SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+          
           export NODE_PATH="$SCRIPT_DIR/../lib/node_modules"
-          exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npx-cli.js" "$@"
+          if [ -f "$SCRIPT_DIR/../lib/node_modules/npm/bin/npx-cli.js" ]; then
+            exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npx-cli.js" "$@"
+          else
+            echo "Error: npx not found in package" >&2
+            exit 1
+          fi
           EOF
             chmod +x dist/bin/npx
+            echo "Node.js packaging completed"
           fi
           
           # Copy FrankenPHP binary
@@ -323,6 +356,25 @@ jobs:
           PROFILE="$HOME/.bash_profile"
           MARKER="# FrankenPHP environment setup"
           
+          # Function to safely execute commands that might affect SSH session
+          safe_exec() {
+              local cmd="$1"
+              local description="$2"
+              echo "Executing: $description"
+              # Use nohup to prevent SSH session termination
+              nohup bash -c "$cmd" > /tmp/frankenphp-install.log 2>&1 &
+              local pid=$!
+              wait $pid
+              local exit_code=$?
+              if [ $exit_code -eq 0 ]; then
+                  echo "✅ $description completed successfully"
+              else
+                  echo "❌ $description failed (exit code: $exit_code)"
+                  echo "Check /tmp/frankenphp-install.log for details"
+                  return $exit_code
+              fi
+          }
+          
           # Function to check if FrankenPHP processes are running
           check_running_processes() {
               local running_processes=$(pgrep -f frankenphp 2>/dev/null || true)
@@ -330,23 +382,15 @@ jobs:
                   echo "WARNING: FrankenPHP processes are currently running:"
                   ps aux | grep -v grep | grep frankenphp || true
                   echo ""
-                  echo "These processes should be stopped before upgrading to prevent issues."
-                  echo "For Supervisor: sudo supervisorctl stop all"
-                  echo "Manual kill: sudo pkill -f frankenphp"
+                  echo "These processes will be stopped automatically during upgrade."
+                  echo "Services will be restarted after installation completes."
                   echo ""
-                  read -p "Stop FrankenPHP processes automatically? [y/N] " -n 1 -r
-                  echo
-                  if [[ $REPLY =~ ^[Yy]$ ]]; then
-                      echo "Stopping FrankenPHP processes..."
-                      sudo supervisorctl stop all 2>/dev/null || true
-                      sleep 2
-                      sudo pkill -f frankenphp 2>/dev/null || true
-                      sleep 1
-                      echo "Processes stopped."
-                  else
-                      echo "Please stop FrankenPHP processes manually and run the installer again."
-                      exit 1
-                  fi
+                  echo "Stopping FrankenPHP processes..."
+                  sudo supervisorctl stop all 2>/dev/null || true
+                  sleep 3
+                  sudo pkill -f frankenphp 2>/dev/null || true
+                  sleep 2
+                  echo "Processes stopped."
               fi
           }
           
@@ -409,10 +453,10 @@ jobs:
           if detect_upgrade; then
               echo "=== UPGRADE MODE ==="
               show_versions
-              echo "⚠️  WARNING: This will:"
+              echo "⚠️  This will:"
               echo "   - Stop running FrankenPHP processes"
-              echo "   - Replace system binaries (may affect SSH session)"
-              echo "   - Require Supervisor restart after completion (sudo service supervisor restart)"
+              echo "   - Atomically replace system binaries"
+              echo "   - Automatically restart Supervisor services"
               echo ""
           
               # Check for running processes first
@@ -425,14 +469,48 @@ jobs:
               backup_installation
           
               if [ "$EUID" -eq 0 ]; then
-                  echo "Cleaning old installation..."
-                  # Remove old binaries more carefully
+                  echo "Preparing atomic upgrade..."
+                  # Create temporary staging directory for atomic replacement
+                  STAGING_DIR="/tmp/frankenphp-staging-$$"
+                  mkdir -p "$STAGING_DIR"/{bin,lib,libexec}
+                  
+                  echo "Staging new files..."
+                  # Stage all files first
+                  cp -r "$SCRIPT_DIR/lib"/* "$STAGING_DIR/lib/" 2>/dev/null || true
+                  [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec"/* "$STAGING_DIR/libexec/" 2>/dev/null || true
+                  
+                  # Stage binaries with wrappers
                   for binary in frankenphp php composer node npm npx git sqlite3 zip unzip php-config phpize; do
-                      rm -f "/usr/local/bin/$binary" "/usr/local/bin/$binary.real" 2>/dev/null || true
+                      if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
+                          cp "$SCRIPT_DIR/bin/$binary" "$STAGING_DIR/bin/"
+                      fi
+                      if [ -f "$SCRIPT_DIR/bin/$binary.real" ]; then
+                          cp "$SCRIPT_DIR/bin/$binary.real" "$STAGING_DIR/bin/"
+                      fi
                   done
-                  rm -f /usr/local/lib/libphp.so* 2>/dev/null || true
+                  
+                  echo "Performing atomic replacement..."
+                  # Now atomically replace the old installation
                   rm -rf /usr/local/lib/node_modules /usr/local/libexec/git-core 2>/dev/null || true
-                  echo "Old installation cleaned."
+                  rm -f /usr/local/lib/libphp.so* 2>/dev/null || true
+                  
+                  # Move staged files to final location
+                  cp -r "$STAGING_DIR/lib"/* /usr/local/lib/ 2>/dev/null || true
+                  cp -r "$STAGING_DIR/libexec"/* /usr/local/libexec/ 2>/dev/null || true
+                  
+                  # Remove old binaries and install new ones atomically
+                  for binary in frankenphp php composer node npm npx git sqlite3 zip unzip php-config phpize; do
+                      if [ -f "$STAGING_DIR/bin/$binary" ]; then
+                          rm -f "/usr/local/bin/$binary" "/usr/local/bin/$binary.real" 2>/dev/null || true
+                          cp "$STAGING_DIR/bin/$binary" "/usr/local/bin/"
+                          [ -f "$STAGING_DIR/bin/$binary.real" ] && cp "$STAGING_DIR/bin/$binary.real" "/usr/local/bin/"
+                          chmod +x "/usr/local/bin/$binary" "/usr/local/bin/$binary.real" 2>/dev/null || true
+                      fi
+                  done
+                  
+                  # Cleanup staging
+                  rm -rf "$STAGING_DIR"
+                  echo "Atomic replacement completed."
               fi
           else
               echo "=== NEW INSTALLATION ==="
@@ -440,74 +518,83 @@ jobs:
           fi
           
           if [ "$EUID" -eq 0 ]; then
-            echo "Installing system-wide..."
-            mkdir -p /usr/local/lib /usr/local/libexec
-          
-            # Copy libraries first
-            echo "Installing libraries..."
-            cp -r "$SCRIPT_DIR/lib"/* /usr/local/lib/
-            [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec"/* /usr/local/libexec/
-          
-            # Update ldconfig
-            echo "/usr/local/lib" > /etc/ld.so.conf.d/frankenphp.conf
-            ldconfig 2>&1 | grep -v "is not a symbolic link" || true
-          
-            # Install git with wrapper (if present)
-            if [ -f "$SCRIPT_DIR/bin/git.real" ]; then
-              echo "Installing git..."
-              cp "$SCRIPT_DIR/bin/git.real" "/usr/local/bin/git.real"
-              chmod +x "/usr/local/bin/git.real"
-              cat > "/usr/local/bin/git" << 'EOL'
+            # Skip installation if we already did atomic upgrade
+            if ! detect_upgrade; then
+              echo "Installing system-wide..."
+              mkdir -p /usr/local/lib /usr/local/libexec
+            
+              # Copy libraries first
+              echo "Installing libraries..."
+              cp -r "$SCRIPT_DIR/lib"/* /usr/local/lib/
+              [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec"/* /usr/local/libexec/
+            
+              # Install git with wrapper (if present)
+              if [ -f "$SCRIPT_DIR/bin/git.real" ]; then
+                echo "Installing git..."
+                cp "$SCRIPT_DIR/bin/git.real" "/usr/local/bin/git.real"
+                chmod +x "/usr/local/bin/git.real"
+                cat > "/usr/local/bin/git" << 'EOL'
           #!/bin/bash
           export GIT_EXEC_PATH="/usr/local/libexec/git-core"
           exec "/usr/local/bin/git.real" "$@"
           EOL
-              chmod +x "/usr/local/bin/git"
-            fi
-          
-            # Install binaries that need LD_LIBRARY_PATH
-            echo "Installing PHP and FrankenPHP..."
-            for binary in frankenphp php; do
-              if [ -f "$SCRIPT_DIR/bin/$binary.real" ]; then
-                cp "$SCRIPT_DIR/bin/$binary.real" "/usr/local/bin/$binary.real"
-                chmod +x "/usr/local/bin/$binary.real"
-                cat > "/usr/local/bin/$binary" << EOL
+                chmod +x "/usr/local/bin/git"
+              fi
+            
+              # Install binaries that need LD_LIBRARY_PATH
+              echo "Installing PHP and FrankenPHP..."
+              for binary in frankenphp php; do
+                if [ -f "$SCRIPT_DIR/bin/$binary.real" ]; then
+                  cp "$SCRIPT_DIR/bin/$binary.real" "/usr/local/bin/$binary.real"
+                  chmod +x "/usr/local/bin/$binary.real"
+                  cat > "/usr/local/bin/$binary" << EOL
           #!/bin/bash
           export LD_LIBRARY_PATH="/usr/local/lib:\$LD_LIBRARY_PATH"
           exec "/usr/local/bin/$binary.real" "\$@"
           EOL
-                chmod +x "/usr/local/bin/$binary"
-              fi
-            done
-          
-            # Install Node.js first (needed for npm/npx)
-            if [ -f "$SCRIPT_DIR/bin/node" ]; then
-              echo "Installing Node.js..."
-              cp "$SCRIPT_DIR/bin/node" "/usr/local/bin/node"
-              chmod +x "/usr/local/bin/node"
-            fi
-          
-            # Install other binaries
-            echo "Installing additional tools..."
-            for binary in composer npm npx sqlite3 zip unzip php-config phpize; do
-              if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
-                if [ "$binary" = "npm" ] || [ "$binary" = "npx" ]; then
-                  # Node.js wrapper scripts (only if node is available)
-                  if [ -f "/usr/local/bin/node" ]; then
-                    cat > "/usr/local/bin/$binary" << EOL
-          #!/bin/bash
-          export NODE_PATH="/usr/local/lib/node_modules"
-          exec "/usr/local/bin/node" "/usr/local/lib/node_modules/npm/bin/$binary-cli.js" "\$@"
-          EOL
-                    chmod +x "/usr/local/bin/$binary"
-                  fi
-                else
-                  # Direct copy for other tools
-                  cp "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
                   chmod +x "/usr/local/bin/$binary"
                 fi
+              done
+            
+              # Install Node.js first (needed for npm/npx)
+              if [ -f "$SCRIPT_DIR/bin/node" ]; then
+                echo "Installing Node.js..."
+                cp "$SCRIPT_DIR/bin/node" "/usr/local/bin/node"
+                chmod +x "/usr/local/bin/node"
               fi
-            done
+            
+              # Install other binaries
+              echo "Installing additional tools..."
+              for binary in composer npm npx sqlite3 zip unzip php-config phpize; do
+                if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
+                  if [ "$binary" = "npm" ] || [ "$binary" = "npx" ]; then
+                    # Node.js wrapper scripts (only if node is available)
+                    if [ -f "/usr/local/bin/node" ]; then
+                      cat > "/usr/local/bin/$binary" << EOL
+          #!/bin/bash
+          export NODE_PATH="/usr/local/lib/node_modules"
+          if [ -f "/usr/local/lib/node_modules/npm/bin/$binary-cli.js" ]; then
+            exec "/usr/local/bin/node" "/usr/local/lib/node_modules/npm/bin/$binary-cli.js" "\$@"
+          else
+            echo "Error: $binary not found in system installation" >&2
+            exit 1
+          fi
+          EOL
+                      chmod +x "/usr/local/bin/$binary"
+                    fi
+                  else
+                    # Direct copy for other tools
+                    cp "$SCRIPT_DIR/bin/$binary" "/usr/local/bin/$binary"
+                    chmod +x "/usr/local/bin/$binary"
+                  fi
+                fi
+              done
+            fi
+            
+            # Update ldconfig for both new installs and upgrades
+            echo "Updating library cache..."
+            echo "/usr/local/lib" > /etc/ld.so.conf.d/frankenphp.conf
+            ldconfig 2>&1 | grep -v "is not a symbolic link" || true
           
             # Final status
             echo ""
@@ -523,10 +610,33 @@ jobs:
           
             [ -f "/tmp/frankenphp-last-backup" ] && echo "" && echo "📦 Backup: $(cat /tmp/frankenphp-last-backup)"
           
-            echo ""
-            echo "🔄 IMPORTANT: Restart services that use FrankenPHP:"
-            echo "   sudo supervisorctl reload    # Reload Supervisor config"
-            echo "   sudo supervisorctl start all # Start all services"
+            # Automatically restart supervisor services if this is an upgrade
+            if detect_upgrade; then
+              echo ""
+              echo "🔄 Automatically restarting Supervisor services..."
+              
+              # Check if supervisor is running
+              if command -v supervisorctl >/dev/null 2>&1; then
+                echo "Reloading Supervisor configuration..."
+                safe_exec "supervisorctl reload" "Supervisor config reload"
+                sleep 3
+                
+                echo "Starting all Supervisor services..."
+                safe_exec "supervisorctl start all" "Starting all services"
+                sleep 2
+                
+                echo "Service status:"
+                supervisorctl status 2>/dev/null || echo "Could not get service status"
+                echo "✅ Supervisor services restarted automatically"
+              else
+                echo "⚠️  Supervisor not found - manual service restart may be needed"
+              fi
+            else
+              echo ""
+              echo "🔄 For production use, configure Supervisor to manage FrankenPHP:"
+              echo "   sudo supervisorctl reload    # Reload Supervisor config"
+              echo "   sudo supervisorctl start all # Start all services"
+            fi
             echo ""
           else
             # User installation (unchanged)
