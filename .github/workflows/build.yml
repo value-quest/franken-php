@@ -96,7 +96,7 @@ jobs:
 
       - name: Install Node.js
         run: |
-          curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+          curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
           sudo apt-get install -y nodejs
 
       - name: Get PHP ${{ env.PHP_VERSION }}
@@ -385,9 +385,20 @@ jobs:
           # Install fresh
           install_fresh() {
               echo "Installing fresh to user directory..."
-              cp -r "$SCRIPT_DIR/bin" "$HOME/"
-              cp -r "$SCRIPT_DIR/lib" "$HOME/"
-              [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec" "$HOME/"
+          
+              # First copy to temporary locations to avoid deleting source before copying
+              cp -r "$SCRIPT_DIR/bin" "$HOME/bin.new"
+              cp -r "$SCRIPT_DIR/lib" "$HOME/lib.new"
+              [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec" "$HOME/libexec.new"
+          
+              # Remove old directories
+              rm -rf "$HOME/bin" "$HOME/lib" "$HOME/libexec"
+          
+              # Move new directories to final locations
+              mv "$HOME/bin.new" "$HOME/bin"
+              mv "$HOME/lib.new" "$HOME/lib"
+              [ -d "$HOME/libexec.new" ] && mv "$HOME/libexec.new" "$HOME/libexec"
+          
               chmod +x "$HOME/bin"/*
               echo "Fresh installation completed"
           }
