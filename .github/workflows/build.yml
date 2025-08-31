@@ -96,8 +96,17 @@ jobs:
 
       - name: Install Node.js
         run: |
+          # Remove any existing nodejs installation
+          sudo apt-get remove -y nodejs npm npx 2>/dev/null || true
+          sudo rm -rf /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx 2>/dev/null || true
+          
+          # Install latest Node.js 22.x
           curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
           sudo apt-get install -y nodejs
+          
+          # Verify installation
+          echo "Node.js version: $(node --version)"
+          echo "npm version: $(npm --version)"
 
       - name: Get PHP ${{ env.PHP_VERSION }}
         run: |
@@ -222,14 +231,32 @@ jobs:
           
           # Copy Node.js and npm
           if command -v node &> /dev/null; then
-            echo "Packaging Node.js..."
-            cp $(which node) dist/bin/
+            echo "Packaging Node.js $(node --version)..."
+            
+            # Copy Node.js binary
+            NODE_PATH=$(which node)
+            echo "Copying Node.js from: $NODE_PATH"
+            cp "$NODE_PATH" dist/bin/
+            
+            # Get npm prefix and copy npm modules
             NPM_PREFIX=$(npm config get prefix)
+            echo "npm prefix: $NPM_PREFIX"
             mkdir -p dist/lib/node_modules
+            
+            # Find npm installation directory
             if [ -d "$NPM_PREFIX/lib/node_modules/npm" ]; then
-              echo "Copying npm modules..."
+              echo "Copying npm from: $NPM_PREFIX/lib/node_modules/npm"
               cp -r "$NPM_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
+            elif [ -d "/usr/lib/node_modules/npm" ]; then
+              echo "Copying npm from: /usr/lib/node_modules/npm"
+              cp -r "/usr/lib/node_modules/npm" dist/lib/node_modules/
+            else
+              echo "Warning: npm modules not found, checking alternative locations..."
+              find /usr -name "node_modules" -type d 2>/dev/null | head -5
             fi
+            
+            # Verify what we've packaged
+            echo "Packaged Node.js version: $(dist/bin/node --version)"
             
             # Create robust npm wrapper
             cat > dist/bin/npm << 'EOF'
@@ -356,23 +383,99 @@ jobs:
           PROFILE="$HOME/.bash_profile"
           MARKER="# FrankenPHP environment setup"
           
-          # Function to safely execute commands that might affect SSH session
-          safe_exec() {
-              local cmd="$1"
-              local description="$2"
-              echo "Executing: $description"
-              # Use nohup to prevent SSH session termination
-              nohup bash -c "$cmd" > /tmp/frankenphp-install.log 2>&1 &
-              local pid=$!
-              wait $pid
-              local exit_code=$?
-              if [ $exit_code -eq 0 ]; then
-                  echo "✅ $description completed successfully"
-              else
-                  echo "❌ $description failed (exit code: $exit_code)"
-                  echo "Check /tmp/frankenphp-install.log for details"
-                  return $exit_code
-              fi
+          # Function to create deferred execution script
+          create_deferred_script() {
+              cat > /tmp/frankenphp-deferred-install.sh << 'DEFERRED_EOF'
+          #!/bin/bash
+          
+          SCRIPT_DIR="$1"
+          UPGRADE_MODE="$2"
+          
+          echo "=== DEFERRED INSTALLATION STARTED ===" >> /tmp/frankenphp-install.log
+          echo "$(date): Starting deferred installation" >> /tmp/frankenphp-install.log
+          
+          # Wait a bit to ensure SSH session is completely disconnected
+          sleep 10
+          
+          if [ "$UPGRADE_MODE" = "true" ]; then
+              echo "$(date): Performing atomic upgrade..." >> /tmp/frankenphp-install.log
+              
+              # Create temporary staging directory for atomic replacement
+              STAGING_DIR="/tmp/frankenphp-staging-$$"
+              mkdir -p "$STAGING_DIR"/{bin,lib,libexec}
+              
+              # Stage all files first
+              cp -r "$SCRIPT_DIR/lib"/* "$STAGING_DIR/lib/" 2>>/tmp/frankenphp-install.log || true
+              [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec"/* "$STAGING_DIR/libexec/" 2>>/tmp/frankenphp-install.log || true
+              
+              # Stage binaries
+              for binary in frankenphp php composer node npm npx git sqlite3 zip unzip php-config phpize; do
+                  if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
+                      cp "$SCRIPT_DIR/bin/$binary" "$STAGING_DIR/bin/" 2>>/tmp/frankenphp-install.log || true
+                  fi
+                  if [ -f "$SCRIPT_DIR/bin/$binary.real" ]; then
+                      cp "$SCRIPT_DIR/bin/$binary.real" "$STAGING_DIR/bin/" 2>>/tmp/frankenphp-install.log || true
+                  fi
+              done
+              
+              echo "$(date): Removing old files..." >> /tmp/frankenphp-install.log
+              # Clean old installation
+              rm -rf /usr/local/lib/node_modules /usr/local/libexec/git-core 2>>/tmp/frankenphp-install.log || true
+              rm -f /usr/local/lib/libphp.so* 2>>/tmp/frankenphp-install.log || true
+              
+              echo "$(date): Installing new files..." >> /tmp/frankenphp-install.log
+              # Install new files
+              cp -r "$STAGING_DIR/lib"/* /usr/local/lib/ 2>>/tmp/frankenphp-install.log || true
+              cp -r "$STAGING_DIR/libexec"/* /usr/local/libexec/ 2>>/tmp/frankenphp-install.log || true
+              
+              # Install binaries atomically
+              for binary in frankenphp php composer node npm npx git sqlite3 zip unzip php-config phpize; do
+                  if [ -f "$STAGING_DIR/bin/$binary" ]; then
+                      rm -f "/usr/local/bin/$binary" "/usr/local/bin/$binary.real" 2>>/tmp/frankenphp-install.log || true
+                      cp "$STAGING_DIR/bin/$binary" "/usr/local/bin/" 2>>/tmp/frankenphp-install.log || true
+                      [ -f "$STAGING_DIR/bin/$binary.real" ] && cp "$STAGING_DIR/bin/$binary.real" "/usr/local/bin/" 2>>/tmp/frankenphp-install.log || true
+                      chmod +x "/usr/local/bin/$binary" "/usr/local/bin/$binary.real" 2>>/tmp/frankenphp-install.log || true
+                  fi
+              done
+              
+              # Cleanup staging
+              rm -rf "$STAGING_DIR"
+              echo "$(date): Atomic replacement completed" >> /tmp/frankenphp-install.log
+          fi
+          
+          # Update ldconfig
+          echo "/usr/local/lib" > /etc/ld.so.conf.d/frankenphp.conf
+          ldconfig 2>>/tmp/frankenphp-install.log || true
+          
+          echo "$(date): Restarting Supervisor..." >> /tmp/frankenphp-install.log
+          # Restart supervisor services
+          if command -v supervisorctl >/dev/null 2>&1; then
+              supervisorctl stop all 2>>/tmp/frankenphp-install.log || true
+              sleep 5
+              supervisorctl reload 2>>/tmp/frankenphp-install.log || true
+              sleep 5
+              supervisorctl start all 2>>/tmp/frankenphp-install.log || true
+              sleep 3
+              supervisorctl status >> /tmp/frankenphp-install.log 2>&1 || true
+          fi
+          
+          echo "$(date): Verifying installation..." >> /tmp/frankenphp-install.log
+          # Verify installed versions
+          echo "=== FINAL VERSIONS ===" >> /tmp/frankenphp-install.log
+          /usr/local/bin/frankenphp version >> /tmp/frankenphp-install.log 2>&1 || echo "FrankenPHP: ERROR" >> /tmp/frankenphp-install.log
+          /usr/local/bin/php --version | head -1 >> /tmp/frankenphp-install.log 2>&1 || echo "PHP: ERROR" >> /tmp/frankenphp-install.log
+          /usr/local/bin/node --version >> /tmp/frankenphp-install.log 2>&1 || echo "Node.js: ERROR" >> /tmp/frankenphp-install.log
+          /usr/local/bin/composer --version >> /tmp/frankenphp-install.log 2>&1 || echo "Composer: ERROR" >> /tmp/frankenphp-install.log
+          echo "======================" >> /tmp/frankenphp-install.log
+          
+          echo "$(date): Installation completed" >> /tmp/frankenphp-install.log
+          echo "=== DEFERRED INSTALLATION FINISHED ===" >> /tmp/frankenphp-install.log
+          
+          # Clean up this script
+          rm -f /tmp/frankenphp-deferred-install.sh
+          DEFERRED_EOF
+              
+              chmod +x /tmp/frankenphp-deferred-install.sh
           }
           
           # Function to check if FrankenPHP processes are running
@@ -454,9 +557,10 @@ jobs:
               echo "=== UPGRADE MODE ==="
               show_versions
               echo "⚠️  This will:"
-              echo "   - Stop running FrankenPHP processes"
-              echo "   - Atomically replace system binaries"
+              echo "   - Stop running FrankenPHP processes"  
+              echo "   - Replace system binaries (SSH session may disconnect)"
               echo "   - Automatically restart Supervisor services"
+              echo "   - Continue installation after SSH disconnection"
               echo ""
           
               # Check for running processes first
@@ -469,48 +573,29 @@ jobs:
               backup_installation
           
               if [ "$EUID" -eq 0 ]; then
-                  echo "Preparing atomic upgrade..."
-                  # Create temporary staging directory for atomic replacement
-                  STAGING_DIR="/tmp/frankenphp-staging-$$"
-                  mkdir -p "$STAGING_DIR"/{bin,lib,libexec}
+                  echo ""
+                  echo "🔄 Setting up deferred installation..."
+                  echo "   This will continue after your SSH session disconnects."
+                  echo "   Check progress with: tail -f /tmp/frankenphp-install.log"
+                  echo ""
                   
-                  echo "Staging new files..."
-                  # Stage all files first
-                  cp -r "$SCRIPT_DIR/lib"/* "$STAGING_DIR/lib/" 2>/dev/null || true
-                  [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec"/* "$STAGING_DIR/libexec/" 2>/dev/null || true
+                  # Create the deferred installation script
+                  create_deferred_script
                   
-                  # Stage binaries with wrappers
-                  for binary in frankenphp php composer node npm npx git sqlite3 zip unzip php-config phpize; do
-                      if [ -f "$SCRIPT_DIR/bin/$binary" ]; then
-                          cp "$SCRIPT_DIR/bin/$binary" "$STAGING_DIR/bin/"
-                      fi
-                      if [ -f "$SCRIPT_DIR/bin/$binary.real" ]; then
-                          cp "$SCRIPT_DIR/bin/$binary.real" "$STAGING_DIR/bin/"
-                      fi
-                  done
+                  # Schedule deferred execution
+                  echo "Starting deferred installation in background..."
+                  nohup /tmp/frankenphp-deferred-install.sh "$SCRIPT_DIR" "true" &
                   
-                  echo "Performing atomic replacement..."
-                  # Now atomically replace the old installation
-                  rm -rf /usr/local/lib/node_modules /usr/local/libexec/git-core 2>/dev/null || true
-                  rm -f /usr/local/lib/libphp.so* 2>/dev/null || true
+                  echo "✅ Upgrade initiated successfully!"
+                  echo ""
+                  echo "The upgrade will continue automatically after SSH disconnection."
+                  echo "To monitor progress: tail -f /tmp/frankenphp-install.log"
+                  echo ""
+                  echo "Your SSH session will disconnect shortly as binaries are replaced."
+                  echo "Reconnect after ~2 minutes to verify the upgrade completed."
+                  echo ""
                   
-                  # Move staged files to final location
-                  cp -r "$STAGING_DIR/lib"/* /usr/local/lib/ 2>/dev/null || true
-                  cp -r "$STAGING_DIR/libexec"/* /usr/local/libexec/ 2>/dev/null || true
-                  
-                  # Remove old binaries and install new ones atomically
-                  for binary in frankenphp php composer node npm npx git sqlite3 zip unzip php-config phpize; do
-                      if [ -f "$STAGING_DIR/bin/$binary" ]; then
-                          rm -f "/usr/local/bin/$binary" "/usr/local/bin/$binary.real" 2>/dev/null || true
-                          cp "$STAGING_DIR/bin/$binary" "/usr/local/bin/"
-                          [ -f "$STAGING_DIR/bin/$binary.real" ] && cp "$STAGING_DIR/bin/$binary.real" "/usr/local/bin/"
-                          chmod +x "/usr/local/bin/$binary" "/usr/local/bin/$binary.real" 2>/dev/null || true
-                      fi
-                  done
-                  
-                  # Cleanup staging
-                  rm -rf "$STAGING_DIR"
-                  echo "Atomic replacement completed."
+                  exit 0
               fi
           else
               echo "=== NEW INSTALLATION ==="
