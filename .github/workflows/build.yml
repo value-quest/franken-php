@@ -152,6 +152,44 @@ jobs:
           sudo make install
           sudo ldconfig
 
+      - name: Create default php.ini with 512MB memory limit
+        run: |
+          PHP_INI_DIR="$(php-config --prefix)/lib"
+          sudo mkdir -p "$PHP_INI_DIR"
+          sudo tee "$PHP_INI_DIR/php.ini" > /dev/null << 'EOF'
+          ; Default PHP configuration for FrankenPHP
+          ; Generated with 512MB default memory limit
+          
+          ; Memory Settings
+          memory_limit = 512M
+          
+          ; File Upload Settings
+          upload_max_filesize = 64M
+          post_max_size = 64M
+          max_execution_time = 60
+          max_input_time = 60
+          
+          ; Error Reporting (adjust for production)
+          display_errors = Off
+          display_startup_errors = Off
+          error_reporting = E_ALL & ~E_DEPRECATED & ~E_STRICT
+          log_errors = On
+          
+          ; Timezone
+          date.timezone = UTC
+          
+          ; OPcache settings (recommended for production)
+          opcache.enable=1
+          opcache.memory_consumption=128
+          opcache.interned_strings_buffer=8
+          opcache.max_accelerated_files=10000
+          opcache.validate_timestamps=1
+          opcache.revalidate_freq=2
+          EOF
+          
+          echo "Created default php.ini at $PHP_INI_DIR/php.ini"
+          echo "Memory limit set to: $(grep memory_limit $PHP_INI_DIR/php.ini)"
+
       - name: Get FrankenPHP
         run: |
           curl -L https://github.com/php/frankenphp/archive/refs/tags/v${FRANKENPHP_VERSION}.tar.gz | tar xz
@@ -183,6 +221,14 @@ jobs:
           # Create directories
           mkdir -p dist/lib
           mkdir -p dist/bin
+          mkdir -p dist/etc
+          
+          # Copy php.ini to package
+          PHP_INI_DIR="$(php-config --prefix)/lib"
+          if [ -f "$PHP_INI_DIR/php.ini" ]; then
+            cp "$PHP_INI_DIR/php.ini" dist/etc/php.ini
+            echo "Packaged php.ini with memory_limit = 512M"
+          fi
           
           # Copy PHP shared library
           PHP_LIB_PATH="$(php-config --prefix)/lib/libphp.so"
@@ -319,7 +365,7 @@ jobs:
             find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/local/lib -name "$lib" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
           done
           
-          # Create self-contained wrapper scripts
+          # Create self-contained wrapper scripts with php.ini configuration
           mv dist/bin/php dist/bin/php.real
           cat > dist/bin/php << 'EOF'
           #!/bin/bash
@@ -333,7 +379,13 @@ jobs:
           SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
           
           export LD_LIBRARY_PATH="$SCRIPT_DIR/../lib:$LD_LIBRARY_PATH"
-          exec "$SCRIPT_DIR/php.real" "$@"
+          
+          # Use packaged php.ini if available
+          if [ -f "$SCRIPT_DIR/../etc/php.ini" ]; then
+            exec "$SCRIPT_DIR/php.real" -c "$SCRIPT_DIR/../etc/php.ini" "$@"
+          else
+            exec "$SCRIPT_DIR/php.real" "$@"
+          fi
           EOF
           chmod +x dist/bin/php
           
@@ -358,6 +410,7 @@ jobs:
           cat > dist/index.php << EOF
           <?php
           echo "FrankenPHP v${FRANKENPHP_VERSION} with PHP " . PHP_VERSION . "\\n";
+          echo "Memory limit: " . ini_get('memory_limit') . "\\n";
           echo "Composer: " . trim(shell_exec(\$_SERVER['PWD'] . "/bin/composer --version")) . "\\n\\n";
           echo "PHP Extensions:\\n";
           \$extensions = get_loaded_extensions();
@@ -402,11 +455,12 @@ jobs:
               
               # Create temporary staging directory for atomic replacement
               STAGING_DIR="/tmp/frankenphp-staging-$$"
-              mkdir -p "$STAGING_DIR"/{bin,lib,libexec}
+              mkdir -p "$STAGING_DIR"/{bin,lib,libexec,etc}
               
               # Stage all files first
               cp -r "$SCRIPT_DIR/lib"/* "$STAGING_DIR/lib/" 2>>/tmp/frankenphp-install.log || true
               [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec"/* "$STAGING_DIR/libexec/" 2>>/tmp/frankenphp-install.log || true
+              [ -d "$SCRIPT_DIR/etc" ] && cp -r "$SCRIPT_DIR/etc"/* "$STAGING_DIR/etc/" 2>>/tmp/frankenphp-install.log || true
               
               # Stage binaries
               for binary in frankenphp php composer node npm npx git sqlite3 zip unzip php-config phpize; do
@@ -427,6 +481,7 @@ jobs:
               # Install new files
               cp -r "$STAGING_DIR/lib"/* /usr/local/lib/ 2>>/tmp/frankenphp-install.log || true
               cp -r "$STAGING_DIR/libexec"/* /usr/local/libexec/ 2>>/tmp/frankenphp-install.log || true
+              cp -r "$STAGING_DIR/etc"/* /usr/local/etc/ 2>>/tmp/frankenphp-install.log || true
               
               # Install binaries atomically
               for binary in frankenphp php composer node npm npx git sqlite3 zip unzip php-config phpize; do
@@ -464,6 +519,7 @@ jobs:
           echo "=== FINAL VERSIONS ===" >> /tmp/frankenphp-install.log
           /usr/local/bin/frankenphp version >> /tmp/frankenphp-install.log 2>&1 || echo "FrankenPHP: ERROR" >> /tmp/frankenphp-install.log
           /usr/local/bin/php --version | head -1 >> /tmp/frankenphp-install.log 2>&1 || echo "PHP: ERROR" >> /tmp/frankenphp-install.log
+          /usr/local/bin/php -i | grep memory_limit >> /tmp/frankenphp-install.log 2>&1 || echo "Memory limit: ERROR" >> /tmp/frankenphp-install.log
           /usr/local/bin/node --version >> /tmp/frankenphp-install.log 2>&1 || echo "Node.js: ERROR" >> /tmp/frankenphp-install.log
           /usr/local/bin/composer --version >> /tmp/frankenphp-install.log 2>&1 || echo "Composer: ERROR" >> /tmp/frankenphp-install.log
           echo "======================" >> /tmp/frankenphp-install.log
@@ -519,12 +575,13 @@ jobs:
               echo "Creating backup at: $backup_dir"
           
               if [ "$EUID" -eq 0 ]; then
-                  mkdir -p "$backup_dir"/{bin,lib,libexec}
+                  mkdir -p "$backup_dir"/{bin,lib,libexec,etc}
                   for binary in frankenphp php composer node npm npx git sqlite3 zip unzip php-config phpize; do
                       [ -f "/usr/local/bin/$binary" ] && cp "/usr/local/bin/$binary" "$backup_dir/bin/" 2>/dev/null || true
                       [ -f "/usr/local/bin/$binary.real" ] && cp "/usr/local/bin/$binary.real" "$backup_dir/bin/" 2>/dev/null || true
                   done
                   [ -f "/usr/local/lib/libphp.so" ] && cp /usr/local/lib/libphp.so* "$backup_dir/lib/" 2>/dev/null || true
+                  [ -f "/usr/local/etc/php.ini" ] && cp /usr/local/etc/php.ini "$backup_dir/etc/" 2>/dev/null || true
               else
                   [ -f "$PROFILE" ] && cp "$PROFILE" "${PROFILE}.backup-$(date +%Y%m%d-%H%M%S)"
               fi
@@ -538,16 +595,19 @@ jobs:
               if [ "$EUID" -eq 0 ]; then
                   /usr/local/bin/frankenphp version 2>/dev/null | head -1 || echo "FrankenPHP: not found"
                   /usr/local/bin/php --version 2>/dev/null | head -1 || echo "PHP: not found"
+                  /usr/local/bin/php -r "echo 'Memory limit: ' . ini_get('memory_limit') . PHP_EOL;" 2>/dev/null || echo "Memory limit: not found"
                   /usr/local/bin/node --version 2>/dev/null | sed 's/^/Node.js: /' || echo "Node.js: not found"
               else
                   command -v frankenphp >/dev/null && frankenphp version 2>/dev/null | head -1 || echo "FrankenPHP: not found"
                   command -v php >/dev/null && php --version 2>/dev/null | head -1 || echo "PHP: not found"
+                  command -v php >/dev/null && php -r "echo 'Memory limit: ' . ini_get('memory_limit') . PHP_EOL;" 2>/dev/null || echo "Memory limit: not found"
                   command -v node >/dev/null && echo "Node.js: $(node --version)" || echo "Node.js: not found"
               fi
               echo ""
               echo "=== NEW VERSIONS (from package) ==="
               echo "FrankenPHP: $(cd "$SCRIPT_DIR" && ./bin/frankenphp.real version 2>/dev/null | head -1 || echo 'included')"
               echo "PHP: $(cd "$SCRIPT_DIR" && ./bin/php.real --version 2>/dev/null | head -1 || echo 'included')"
+              echo "Memory limit: $(cd "$SCRIPT_DIR" && ./bin/php.real -c "$SCRIPT_DIR/etc/php.ini" -r "echo ini_get('memory_limit');" 2>/dev/null || echo '512M')"
               echo "Node.js: $(cd "$SCRIPT_DIR" && ./bin/node --version 2>/dev/null || echo 'included')"
               echo ""
           }
@@ -606,12 +666,18 @@ jobs:
             # Skip installation if we already did atomic upgrade
             if ! detect_upgrade; then
               echo "Installing system-wide..."
-              mkdir -p /usr/local/lib /usr/local/libexec
+              mkdir -p /usr/local/lib /usr/local/libexec /usr/local/etc
             
               # Copy libraries first
               echo "Installing libraries..."
               cp -r "$SCRIPT_DIR/lib"/* /usr/local/lib/
               [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec"/* /usr/local/libexec/
+              
+              # Copy php.ini
+              if [ -f "$SCRIPT_DIR/etc/php.ini" ]; then
+                echo "Installing php.ini with 512MB memory limit..."
+                cp "$SCRIPT_DIR/etc/php.ini" /usr/local/etc/php.ini
+              fi
             
               # Install git with wrapper (if present)
               if [ -f "$SCRIPT_DIR/bin/git.real" ]; then
@@ -632,11 +698,26 @@ jobs:
                 if [ -f "$SCRIPT_DIR/bin/$binary.real" ]; then
                   cp "$SCRIPT_DIR/bin/$binary.real" "/usr/local/bin/$binary.real"
                   chmod +x "/usr/local/bin/$binary.real"
-                  cat > "/usr/local/bin/$binary" << EOL
+                  
+                  if [ "$binary" = "php" ]; then
+                    # PHP wrapper with php.ini support
+                    cat > "/usr/local/bin/$binary" << EOL
+          #!/bin/bash
+          export LD_LIBRARY_PATH="/usr/local/lib:\$LD_LIBRARY_PATH"
+          if [ -f "/usr/local/etc/php.ini" ]; then
+            exec "/usr/local/bin/$binary.real" -c "/usr/local/etc/php.ini" "\$@"
+          else
+            exec "/usr/local/bin/$binary.real" "\$@"
+          fi
+          EOL
+                  else
+                    # FrankenPHP wrapper
+                    cat > "/usr/local/bin/$binary" << EOL
           #!/bin/bash
           export LD_LIBRARY_PATH="/usr/local/lib:\$LD_LIBRARY_PATH"
           exec "/usr/local/bin/$binary.real" "\$@"
           EOL
+                  fi
                   chmod +x "/usr/local/bin/$binary"
                 fi
               done
@@ -686,10 +767,12 @@ jobs:
             echo "=== INSTALLATION COMPLETED ==="
             echo "Libraries: /usr/local/lib"
             echo "Binaries: /usr/local/bin"
+            echo "Configuration: /usr/local/etc/php.ini"
             echo ""
             echo "✅ Installed versions:"
             /usr/local/bin/frankenphp version 2>/dev/null | head -1 || echo "FrankenPHP: ⚠️  error getting version"
             /usr/local/bin/php --version 2>/dev/null | head -1 || echo "PHP: ⚠️  error getting version"
+            /usr/local/bin/php -r "echo 'Memory limit: ' . ini_get('memory_limit') . PHP_EOL;" 2>/dev/null || echo "Memory limit: ⚠️  error getting value"
             /usr/local/bin/composer --version 2>/dev/null | head -1 || echo "Composer: ⚠️  error getting version"
             /usr/local/bin/node --version 2>/dev/null | sed 's/^/Node.js: /' || echo "Node.js: ⚠️  error getting version"
           
@@ -703,11 +786,11 @@ jobs:
               # Check if supervisor is running
               if command -v supervisorctl >/dev/null 2>&1; then
                 echo "Reloading Supervisor configuration..."
-                safe_exec "supervisorctl reload" "Supervisor config reload"
+                supervisorctl reload 2>/dev/null || echo "Could not reload Supervisor"
                 sleep 3
                 
                 echo "Starting all Supervisor services..."
-                safe_exec "supervisorctl start all" "Starting all services"
+                supervisorctl start all 2>/dev/null || echo "Could not start services"
                 sleep 2
                 
                 echo "Service status:"
@@ -724,22 +807,31 @@ jobs:
             fi
             echo ""
           else
-            # User installation (unchanged)
+            # User installation with php.ini support
             [ ! -f "$PROFILE" ] && cat > "$PROFILE" << 'EOL'
           if [ -f ~/.profile ]; then . ~/.profile; fi
           if [ -f ~/.bashrc ]; then . ~/.bashrc; fi
           EOL
           
             grep -q "$MARKER" "$PROFILE" 2>/dev/null && sed -i.bak "/^$MARKER/,/^# End of FrankenPHP environment setup/d" "$PROFILE"
+            
+            # Copy php.ini to user directory
+            mkdir -p "$HOME/.config/frankenphp"
+            if [ -f "$SCRIPT_DIR/etc/php.ini" ]; then
+              cp "$SCRIPT_DIR/etc/php.ini" "$HOME/.config/frankenphp/php.ini"
+              echo "Installed php.ini with 512MB memory limit to: $HOME/.config/frankenphp/php.ini"
+            fi
           
             cat >> "$PROFILE" << EOL
           $MARKER
           export PATH="$SCRIPT_DIR/bin:\$PATH"
           export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:\$LD_LIBRARY_PATH"
+          export PHPRC="$HOME/.config/frankenphp/php.ini"
           # End of FrankenPHP environment setup
           EOL
           
             echo "User installation completed! Run: source ~/.bash_profile"
+            echo "PHP configured with 512MB memory limit"
           fi
           EOF
           chmod +x dist/install.sh
@@ -772,8 +864,23 @@ jobs:
           
           The included `Caddyfile` serves the demo `index.php` file.
           
+          ## Default Configuration
+          
+          This build includes a pre-configured `php.ini` with:
+          - **Memory limit: 512M** (default)
+          - Upload max filesize: 64M
+          - Post max size: 64M
+          - Max execution time: 60s
+          - OPcache enabled for production performance
+          
+          Configuration file locations:
+          - System-wide: `/usr/local/etc/php.ini`
+          - User install: `~/.config/frankenphp/php.ini`
+          
+          You can modify these settings by editing the php.ini file.
+          
           ## Included Tools
-          - FrankenPHP, PHP 8.x, Composer
+          - FrankenPHP, PHP 8.x (with 512MB default memory), Composer
           - Node.js 22.x LTS, npm, npx
           - Git, sqlite3, zip/unzip
           
@@ -880,10 +987,12 @@ jobs:
             
             ## What's Included
             - FrankenPHP, PHP 8.x with all common extensions, Composer
+            - **Default PHP memory limit: 512M** (configured in included php.ini)
             - Node.js 22.x LTS, npm, npx
             - Git, sqlite3, zip/unzip
             - Self-contained binaries (work with Supervisor!)
             - ext-pcntl for Laravel Octane support
+            - Pre-configured php.ini with production-ready settings
             
             ## Two Install Methods
             1. **System-wide** (`sudo`): Creates `/usr/local/bin` symlinks, works everywhere
