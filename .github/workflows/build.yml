@@ -94,10 +94,27 @@ jobs:
           go-version: '1.24'
           cache: false
 
-      - name: Install Node.js
+      - name: Install Node.js 22 LTS
         run: |
+          # Remove any existing Node.js
+          sudo apt-get remove -y nodejs npm || true
+          sudo rm -rf /usr/local/lib/node_modules /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx || true
+
+          # Install Node.js 22.x from NodeSource
           curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
           sudo apt-get install -y nodejs
+
+          # Verify Node.js 22 is installed
+          node --version
+          npm --version
+
+          # Ensure it's version 22
+          NODE_MAJOR=$(node --version | cut -d'.' -f1 | sed 's/v//')
+          if [ "$NODE_MAJOR" != "22" ]; then
+            echo "ERROR: Node.js version is not 22. Got: $(node --version)"
+            exit 1
+          fi
+          echo "Node.js 22 successfully installed: $(node --version)"
 
       - name: Get PHP ${{ env.PHP_VERSION }}
         run: |
