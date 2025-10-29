@@ -238,15 +238,34 @@ jobs:
               chmod +x dist/bin/git
             fi
           fi
-          
-          # Copy Node.js and npm
+
+          # Copy Node.js and npm (ensuring version compatibility)
           if command -v node &> /dev/null; then
+            echo "Packaging Node.js $(node --version) with npm $(npm --version)"
+
+            # Copy Node.js binary
             cp $(which node) dist/bin/
+
+            # Get npm prefix and copy npm modules
             NPM_PREFIX=$(npm config get prefix)
             mkdir -p dist/lib/node_modules
+
+            # Copy npm (must match Node.js version)
             if [ -d "$NPM_PREFIX/lib/node_modules/npm" ]; then
-              cp -r "$NPM_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
+              echo "Copying npm from $NPM_PREFIX/lib/node_modules/npm"
+              cp -rL "$NPM_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
+            else
+              echo "ERROR: npm modules not found at $NPM_PREFIX/lib/node_modules/npm"
+              exit 1
             fi
+
+            # Verify npm was copied correctly
+            if [ ! -f "dist/lib/node_modules/npm/bin/npm-cli.js" ]; then
+              echo "ERROR: npm-cli.js not found after copying"
+              exit 1
+            fi
+
+            # Create npm wrapper
             cat > dist/bin/npm << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -254,6 +273,8 @@ jobs:
           exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npm-cli.js" "$@"
           EOF
             chmod +x dist/bin/npm
+
+            # Create npx wrapper
             cat > dist/bin/npx << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -261,6 +282,14 @@ jobs:
           exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npx-cli.js" "$@"
           EOF
             chmod +x dist/bin/npx
+
+            # Test that npm works with the packaged Node.js
+            echo "Testing npm..."
+            (cd dist && LD_LIBRARY_PATH="$PWD/lib" ./bin/npm --version) || {
+              echo "ERROR: npm test failed"
+              exit 1
+            }
+            echo "npm packaged successfully"
           fi
 
       - name: Copy binaries and libraries
@@ -548,6 +577,12 @@ jobs:
 
           update_installation() {
               echo "Updating installation..."
+
+              # IMPORTANT: Clean up old npm to prevent version conflicts
+              if [ -d "$HOME/lib/node_modules/npm" ]; then
+                  echo "Removing old npm modules to prevent version conflicts..."
+                  rm -rf "$HOME/lib/node_modules"
+              fi
 
               mkdir -p "$HOME/bin.new" "$HOME/lib.new"
               cp -r "$SCRIPT_DIR/bin"/* "$HOME/bin.new/"
