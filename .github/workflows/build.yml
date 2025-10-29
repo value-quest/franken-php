@@ -382,23 +382,31 @@ jobs:
               fi
           }
           
-          # Install fresh
+          # Install fresh with atomic replacement
           install_fresh() {
               echo "Installing fresh to user directory..."
-          
-              # First copy to temporary locations to avoid deleting source before copying
-              cp -r "$SCRIPT_DIR/bin" "$HOME/bin.new"
-              cp -r "$SCRIPT_DIR/lib" "$HOME/lib.new"
+
+              # Copy to new directories
+              mkdir -p "$HOME/bin.new" "$HOME/lib.new"
+              cp -r "$SCRIPT_DIR/bin"/* "$HOME/bin.new/"
+              cp -r "$SCRIPT_DIR/lib"/* "$HOME/lib.new/"
               [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec" "$HOME/libexec.new"
-          
-              # Remove old directories
-              rm -rf "$HOME/bin" "$HOME/lib" "$HOME/libexec"
-          
-              # Move new directories to final locations
+
+              # Atomic swap - mv is atomic within same filesystem
+              [ -d "$HOME/bin" ] && mv "$HOME/bin" "$HOME/bin.old" 2>/dev/null || true
               mv "$HOME/bin.new" "$HOME/bin"
+
+              [ -d "$HOME/lib" ] && mv "$HOME/lib" "$HOME/lib.old" 2>/dev/null || true
               mv "$HOME/lib.new" "$HOME/lib"
-              [ -d "$HOME/libexec.new" ] && mv "$HOME/libexec.new" "$HOME/libexec"
-          
+
+              if [ -d "$HOME/libexec.new" ]; then
+                  [ -d "$HOME/libexec" ] && mv "$HOME/libexec" "$HOME/libexec.old" 2>/dev/null || true
+                  mv "$HOME/libexec.new" "$HOME/libexec"
+              fi
+
+              # Clean up old directories after successful swap
+              rm -rf "$HOME/bin.old" "$HOME/lib.old" "$HOME/libexec.old"
+
               chmod +x "$HOME/bin"/*
               echo "Fresh installation completed"
           }
@@ -407,23 +415,23 @@ jobs:
           update_profile() {
               local profile="$HOME/.bash_profile"
               local marker="# FrankenPHP environment setup"
-          
+
               if [ -f "$profile" ] && grep -q "$marker" "$profile"; then
                   sed -i.bak "/^$marker/,/^# End of FrankenPHP environment setup/d" "$profile"
               fi
-          
+
               [ ! -f "$profile" ] && cat > "$profile" << 'EOFPROFILE'
           if [ -f ~/.profile ]; then . ~/.profile; fi
           if [ -f ~/.bashrc ]; then . ~/.bashrc; fi
           EOFPROFILE
-          
+
               cat >> "$profile" << EOFPROFILE
           $marker
           export PATH="$HOME/bin:\$PATH"
-          export LD_LIBRARY_PATH="$HOME/lib:\$LD_LIBRARY_PATH"
+          # LD_LIBRARY_PATH is handled by wrapper scripts, not set globally
           # End of FrankenPHP environment setup
           EOFPROFILE
-          
+
               echo "Profile updated"
           }
           
@@ -490,6 +498,104 @@ jobs:
           EOF
           chmod +x dist/install.sh
 
+      - name: Create update script
+        run: |
+          cat > dist/update.sh << 'EOF'
+          #!/bin/bash
+          # update.sh - Safe update script for FrankenPHP that prevents SSH disconnection
+
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+          exec 1>&2
+
+          show_versions() {
+              echo "=== NEW VERSIONS ==="
+              echo "  FrankenPHP: $(cd "$SCRIPT_DIR" && LD_LIBRARY_PATH="$SCRIPT_DIR/lib" ./bin/frankenphp.real version 2>/dev/null | head -1 || echo 'included')"
+              echo "  PHP: $(cd "$SCRIPT_DIR" && LD_LIBRARY_PATH="$SCRIPT_DIR/lib" ./bin/php.real --version 2>/dev/null | head -1 || echo 'included')"
+              echo "  Node.js: $(cd "$SCRIPT_DIR" && ./bin/node --version 2>/dev/null || echo 'included')"
+              echo ""
+          }
+
+          stop_services() {
+              echo "Stopping FrankenPHP processes..."
+              pkill -u "$USER" -f frankenphp 2>/dev/null || true
+              if command -v supervisorctl >/dev/null 2>&1; then
+                  if [ "$EUID" -eq 0 ]; then
+                      supervisorctl stop all 2>/dev/null || true
+                  else
+                      timeout 10 sudo supervisorctl stop all 2>/dev/null || echo "Supervisor stop skipped"
+                  fi
+              fi
+              sleep 2
+              echo "Processes stopped"
+          }
+
+          update_installation() {
+              echo "Updating installation with atomic replacement..."
+
+              mkdir -p "$HOME/bin.new" "$HOME/lib.new"
+              cp -r "$SCRIPT_DIR/bin"/* "$HOME/bin.new/"
+              cp -r "$SCRIPT_DIR/lib"/* "$HOME/lib.new/"
+              [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec" "$HOME/libexec.new"
+
+              # Atomic swap prevents library-in-use issues
+              [ -d "$HOME/bin" ] && mv "$HOME/bin" "$HOME/bin.old" || true
+              mv "$HOME/bin.new" "$HOME/bin"
+
+              [ -d "$HOME/lib" ] && mv "$HOME/lib" "$HOME/lib.old" || true
+              mv "$HOME/lib.new" "$HOME/lib"
+
+              if [ -d "$HOME/libexec.new" ]; then
+                  [ -d "$HOME/libexec" ] && mv "$HOME/libexec" "$HOME/libexec.old" || true
+                  mv "$HOME/libexec.new" "$HOME/libexec"
+              fi
+
+              rm -rf "$HOME/bin.old" "$HOME/lib.old" "$HOME/libexec.old"
+              chmod +x "$HOME/bin"/*
+              echo "Update completed"
+          }
+
+          restart_supervisor() {
+              if command -v supervisorctl >/dev/null 2>&1; then
+                  echo "Restarting Supervisor..."
+                  if [ "$EUID" -eq 0 ]; then
+                      service supervisor restart && sleep 2 && supervisorctl status
+                  else
+                      timeout 10 sudo service supervisor restart 2>/dev/null || echo "Restart Supervisor manually: sudo service supervisor restart"
+                  fi
+              fi
+          }
+
+          main() {
+              echo "FrankenPHP Update"
+              echo "================="
+
+              if [ ! -f "$SCRIPT_DIR/bin/frankenphp.real" ]; then
+                  echo "Error: Run this from the extracted FrankenPHP directory"
+                  exit 1
+              fi
+
+              show_versions
+              echo "This will update your FrankenPHP installation using atomic replacement."
+              echo "SSH connection will remain stable."
+              echo ""
+
+              printf "Continue? [y/N] "
+              read -r REPLY
+              [[ ! "$REPLY" =~ ^[Yy]$ ]] && echo "Cancelled" && exit 1
+
+              stop_services
+              update_installation
+              restart_supervisor
+
+              echo ""
+              echo "UPDATE COMPLETED - SSH connection maintained!"
+              echo "Test with: php -v && frankenphp version"
+          }
+
+          main "$@"
+          EOF
+          chmod +x dist/update.sh
+
       - name: Create README
         run: |
           cat > dist/README.md << 'EOF'
@@ -511,18 +617,19 @@ jobs:
           ```
           
           ### Updates
-          
-          **For existing installations**
+
+          **For existing installations - use update.sh (no SSH disconnection!)**
           ```bash
-          sudo ./update.sh    # System-wide
           ./update.sh         # User installation
+          sudo ./update.sh    # System-wide
           ```
-          
-          The update script will:
+
+          The update script uses atomic file replacement to prevent SSH disconnection:
+          - Libraries are swapped atomically (no library-in-use issues)
+          - LD_LIBRARY_PATH not set globally (SSH uses system libraries)
           - Stop FrankenPHP services automatically
           - Replace all binaries (including Node.js)
-          - Restart Supervisor services
-          - Create backups before updating
+          - Restart Supervisor services automatically
           
           ## Quick Start Demo
           
