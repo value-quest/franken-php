@@ -519,7 +519,7 @@ jobs:
         run: |
           cat > dist/update.sh << 'EOF'
           #!/bin/bash
-          # update.sh - Safe update script for FrankenPHP that prevents SSH disconnection
+          # update.sh
 
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
           exec 1>&2
@@ -547,7 +547,7 @@ jobs:
           }
 
           update_installation() {
-              echo "Updating installation with atomic replacement..."
+              echo "Updating installation..."
 
               mkdir -p "$HOME/bin.new" "$HOME/lib.new"
               cp -r "$SCRIPT_DIR/bin"/* "$HOME/bin.new/"
@@ -592,8 +592,7 @@ jobs:
               fi
 
               show_versions
-              echo "This will update your FrankenPHP installation using atomic replacement."
-              echo "SSH connection will remain stable."
+              echo "This will update your franken-php installation."
               echo ""
 
               printf "Continue? [y/N] "
@@ -641,9 +640,8 @@ jobs:
           sudo ./update.sh    # System-wide
           ```
 
-          The update script uses atomic file replacement to prevent SSH disconnection:
-          - Libraries are swapped atomically (no library-in-use issues)
-          - LD_LIBRARY_PATH not set globally (SSH uses system libraries)
+          The update script usesfile replacement:
+          - Libraries are swapped
           - Stop FrankenPHP services automatically
           - Replace all binaries (including Node.js)
           - Restart Supervisor services automatically

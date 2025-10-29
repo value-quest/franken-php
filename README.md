@@ -38,8 +38,6 @@ sudo ./update.sh     # System-wide
 ./update.sh          # User installation
 ```
 
-**SSH Warning**: If connected via SSH, you may be disconnected during library replacement. This is normal - the update completes automatically. Reconnect and restart supervisor manually: `sudo service supervisor restart`
-
 ## Installation Scripts
 
 - **install.sh** - For new installations only. Detects existing installations and redirects to update.sh
@@ -47,7 +45,7 @@ sudo ./update.sh     # System-wide
     - Stops FrankenPHP processes gracefully
     - Creates backup before updating
     - Replaces all binaries and libraries
-    - Restarts Supervisor services automatically (if SSH doesn't disconnect)
+    - Restarts Supervisor services automatically
 
 ## Quick Start
 
