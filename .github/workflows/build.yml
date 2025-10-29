@@ -501,7 +501,7 @@ jobs:
           
           # Main execution
           main() {
-              echo "FrankenPHP Update (Clean Reinstall)"
+              echo "franken-php Update (Clean Reinstall)"
               echo "==================================="
           
               if [ ! -f "$SCRIPT_DIR/bin/frankenphp.real" ]; then
@@ -580,7 +580,6 @@ jobs:
 
               # IMPORTANT: Clean up old npm to prevent version conflicts
               if [ -d "$HOME/lib/node_modules/npm" ]; then
-                  echo "Removing old npm modules to prevent version conflicts..."
                   rm -rf "$HOME/lib/node_modules"
               fi
 
@@ -618,7 +617,7 @@ jobs:
           }
 
           main() {
-              echo "FrankenPHP Update"
+              echo "franken-php update"
               echo "================="
 
               if [ ! -f "$SCRIPT_DIR/bin/frankenphp.real" ]; then
@@ -650,7 +649,7 @@ jobs:
       - name: Create README
         run: |
           cat > dist/README.md << 'EOF'
-          # FrankenPHP Distribution
+          # franken-php distribution
           
           ## Installation
           
@@ -669,7 +668,7 @@ jobs:
           
           ### Updates
 
-          **For existing installations - use update.sh (no SSH disconnection!)**
+          **For existing installations - use update.sh**
           ```bash
           ./update.sh         # User installation
           sudo ./update.sh    # System-wide

@@ -29,9 +29,11 @@ No further installation is needed to run your PHP app!
 For existing installations, use the update script instead of install.sh:
 
 ```bash
+# Get new version (head over to Releases)
+wget https://github.com/value-quest/franken-php/releases/download/v[FrankenPHP version]/frankenphp-linux-amd64-php[8.3 / 8.4].tar.gz
+
 # Extract new version
 tar -xzf frankenphp-linux-amd64-php8*.tar.gz
-cd frankenphp-*
 
 # Update existing installation
 sudo ./update.sh     # System-wide
