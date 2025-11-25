@@ -252,7 +252,17 @@ unzip project.zip
 sudo rm -f /usr/local/bin/{frankenphp,php,composer,node,npm,npx,git,sqlite3,zip,unzip}
 sudo rm -f /usr/local/bin/*.real
 sudo rm -rf /usr/local/lib/node_modules /usr/local/libexec/git-core
-sudo rm -f /etc/ld.so.conf.d/frankenphp.conf
+sudo rm -f /usr/local/lib/libphp.so* \
+    /usr/local/lib/libicu*.so.* \
+    /usr/local/lib/libgd.so.* \
+    /usr/local/lib/libpng*.so.* \
+    /usr/local/lib/libcurl.so.* \
+    /usr/local/lib/libzip.so.* \
+    /usr/local/lib/libonig.so.* \
+    /usr/local/lib/libxml2.so.* \
+    /usr/local/lib/libjpeg.so.* \
+    /usr/local/lib/libxslt.so.* \
+    /usr/local/lib/libfreetype.so.*
 sudo ldconfig
 ```
 
