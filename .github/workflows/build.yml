@@ -94,27 +94,27 @@ jobs:
           go-version: '1.24'
           cache: false
 
-      - name: Install Node.js 22 LTS
+      - name: Install Node.js 24 LTS
         run: |
           # Remove any existing Node.js
           sudo apt-get remove -y nodejs npm || true
           sudo rm -rf /usr/local/lib/node_modules /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx || true
 
-          # Install Node.js 22.x from NodeSource
-          curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+          # Install Node.js 24.x from NodeSource
+          curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
           sudo apt-get install -y nodejs
 
-          # Verify Node.js 22 is installed
+          # Verify Node.js 24 is installed
           node --version
           npm --version
 
-          # Ensure it's version 22
+          # Ensure it's version 24
           NODE_MAJOR=$(node --version | cut -d'.' -f1 | sed 's/v//')
-          if [ "$NODE_MAJOR" != "22" ]; then
-            echo "ERROR: Node.js version is not 22. Got: $(node --version)"
+          if [ "$NODE_MAJOR" != "24" ]; then
+            echo "ERROR: Node.js version is not 24. Got: $(node --version)"
             exit 1
           fi
-          echo "Node.js 22 successfully installed: $(node --version)"
+          echo "Node.js 24 successfully installed: $(node --version)"
 
       - name: Get PHP ${{ env.PHP_VERSION }}
         run: |
@@ -691,7 +691,7 @@ jobs:
           
           ## Included Tools
           - FrankenPHP, PHP 8.x, Composer
-          - Node.js 22.x LTS, npm, npx
+          - Node.js 24.x LTS, npm, npx
           - Git, sqlite3, zip/unzip
           
           ## PHP Extensions
@@ -800,7 +800,7 @@ jobs:
             
             ## What's Included
             - FrankenPHP, PHP 8.x with all common extensions, Composer
-            - Node.js 22.x LTS, npm, npx
+            - Node.js 24.x LTS, npm, npx
             - Git, sqlite3, zip/unzip
             - Self-contained binaries
             - ext-pcntl for Laravel Octane support
