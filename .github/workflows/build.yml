@@ -638,7 +638,6 @@ jobs:
               restart_supervisor
 
               echo ""
-              echo "UPDATE COMPLETED - SSH connection maintained!"
               echo "Test with: php -v && frankenphp version"
           }
 
@@ -788,9 +787,8 @@ jobs:
 
             ## Quick Install
             ```bash
-            tar -xzf frankenphp-linux-amd64-php85.tar.gz
-            cd frankenphp-*
-            ./install.sh
+            tar -xzf frankenphp-linux-amd64-php[version].tar.gz
+            (sudo) ./install.sh 
             source ~/.bash_profile
             ```
 
