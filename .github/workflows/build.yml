@@ -82,11 +82,32 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential curl ca-certificates \
-            pkg-config libssl-dev zlib1g-dev libxml2-dev libbrotli-dev \
+            pkg-config libssl-dev zlib1g-dev libbrotli-dev \
             autoconf automake libtool libsqlite3-dev libcurl4-openssl-dev libonig-dev \
             libmariadb-dev libmariadb-dev-compat \
             libzip-dev libpng-dev libjpeg-dev libfreetype6-dev \
-            libicu-dev libxslt1-dev sqlite3 zip unzip git
+            libicu-dev libxslt1-dev sqlite3 zip unzip git \
+            python3-dev  # needed for libxml2 autogen
+
+      - name: Get latest libxml2 version
+        id: get-libxml2
+        run: |
+          LIBXML2_LATEST=$(curl -s https://api.github.com/repos/GNOME/libxml2/releases/latest | jq -r '.tag_name' | sed 's/v//')
+          echo "libxml2_latest=$LIBXML2_LATEST" >> $GITHUB_OUTPUT
+          echo "Latest libxml2: $LIBXML2_LATEST"    
+
+      - name: Build libxml2 ${{ steps.get-libxml2.outputs.libxml2_latest }} from source
+        run: |
+          cd /tmp
+          LIBXML2_VERSION="${{ steps.get-libxml2.outputs.libxml2_latest }}"
+          curl -L https://github.com/GNOME/libxml2/archive/refs/tags/v${LIBXML2_VERSION}.tar.gz -o libxml2.tar.gz
+          tar -xzf libxml2.tar.gz
+          cd libxml2-${LIBXML2_VERSION}
+          ./autogen.sh --prefix=/usr/local --without-python --without-readline
+          make -j$(nproc)
+          sudo make install
+          sudo ldconfig
+          echo "libxml2 version: $(xml2-config --version)"
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -124,6 +145,7 @@ jobs:
       - name: Configure and Build PHP
         run: |
           cd php-${{ env.PHP_VERSION }}/
+          PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" \
           ./configure \
             --enable-embed \
             --enable-zts \
@@ -159,6 +181,9 @@ jobs:
           make -j$(nproc)
           sudo make install
           sudo ldconfig
+          # Verify PHP is linked against new libxml2
+          php --version
+          php -r "echo 'libxml: ' . LIBXML_DOTTED_VERSION . PHP_EOL;"
 
       - name: Get FrankenPHP
         run: |
@@ -298,16 +323,24 @@ jobs:
           cp frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp dist/bin/frankenphp
           chmod +x dist/bin/frankenphp
           
-          # Copy all required shared libraries
+          # Copy all required shared libraries from system binaries
           echo "Copying shared library dependencies..."
           for binary in frankenphp-${FRANKENPHP_VERSION}/caddy/frankenphp/frankenphp "$(php-config --prefix)/bin/php" "$(php-config --prefix)/lib/libphp.so"; do
             ldd "$binary" | grep "=> /" | awk '{print $3}' | grep -v "libc.so" | grep -v "ld-linux" | xargs -I '{}' cp -v '{}' dist/lib/ || true
           done
           
-          # Copy additional common libraries
-          for lib in libzip.so* libpng16.so* libjpeg.so* libfreetype.so* libicu*.so* libonig.so* libxml2.so* libxslt.so* libgd.so* libssl.so* libcrypto.so* libcurl.so* libmariadb.so*; do
-            find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/local/lib -name "$lib" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
+          # Copy additional common libraries (system paths)
+          for lib in libzip.so* libpng16.so* libjpeg.so* libfreetype.so* libicu*.so* libonig.so* libxslt.so* libgd.so* libssl.so* libcrypto.so* libcurl.so* libmariadb.so*; do
+            find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu -name "$lib" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
           done
+
+          # Copy our custom-built libxml2 2.15.1 (overrides any system version copied above)
+          echo "Copying custom libxml2 ${{ steps.get-libxml2.outputs.libxml2_latest }}..."
+          find /usr/local/lib -name "libxml2.so*" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
+
+          # Verify libxml2 version in dist
+          echo "libxml2 in dist/lib:"
+          ls -la dist/lib/libxml2*
 
       - name: Create wrapper scripts
         run: |
@@ -343,6 +376,12 @@ jobs:
           exec "$SCRIPT_DIR/frankenphp.real" "$@"
           EOF
           chmod +x dist/bin/frankenphp
+
+      - name: Verify libxml2 version in built PHP
+        run: |
+          cd dist
+          LD_LIBRARY_PATH="$PWD/lib" ./bin/php.real -r "echo 'libxml2 version: ' . LIBXML_DOTTED_VERSION . PHP_EOL;"
+          # Should show 2.15.1
 
       - name: Create demo files
         run: |
@@ -638,6 +677,7 @@ jobs:
               restart_supervisor
 
               echo ""
+              echo "UPDATE COMPLETED - SSH connection maintained!"
               echo "Test with: php -v && frankenphp version"
           }
 
@@ -673,8 +713,8 @@ jobs:
           sudo ./update.sh    # System-wide
           ```
 
-          The update script usesfile replacement:
-          - Libraries are swapped
+          The update script uses atomic file replacement:
+          - Libraries are swapped atomically
           - Stop FrankenPHP services automatically
           - Replace all binaries (including Node.js)
           - Restart Supervisor services automatically
@@ -695,6 +735,9 @@ jobs:
           
           ## PHP Extensions
           Core, DOM, MB, XML, PDO, MySQL, SQLite, GD, Zlib, Curl, OpenSSL, BCMath, Intl, PCNTL, and more.
+
+          ## libxml2
+          Compiled from source (latest release).
           
           ## Laravel Octane Support
           Includes ext-pcntl required for Laravel Octane process management.
@@ -787,8 +830,9 @@ jobs:
 
             ## Quick Install
             ```bash
-            tar -xzf frankenphp-linux-amd64-php[version].tar.gz
-            (sudo) ./install.sh 
+            tar -xzf frankenphp-linux-amd64-php85.tar.gz
+            cd frankenphp-*
+            ./install.sh
             source ~/.bash_profile
             ```
 
@@ -800,7 +844,7 @@ jobs:
             - FrankenPHP, PHP 8.x with all common extensions, Composer
             - Node.js 24.x LTS, npm, npx
             - Git, sqlite3, zip/unzip
-            - Self-contained binaries
+            - Self-contained binaries with libxml2 2.15.1 bundled
             - ext-pcntl for Laravel Octane support
             
             ## Simple Update Process
