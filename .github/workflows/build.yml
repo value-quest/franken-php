@@ -335,13 +335,18 @@ jobs:
             find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu -name "$lib" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
           done
 
+          # Copy libxml2
           echo "Copying custom libxml2 ${LIBXML2_VERSION}..."
-          cp -P /usr/local/lib/libxml2.so.2.${LIBXML2_VERSION} dist/lib/ 2>/dev/null || \
-          find /usr/local/lib -name "libxml2.so.2.*.*" -exec cp -v {} dist/lib/ \;
+          cp -v /usr/local/lib/libxml2.so* dist/lib/ 2>/dev/null || true
           
-          # Create symlinks
+          # Recreate symlinks correctly
           cd dist/lib
-          LIBXML2_FILE=$(ls libxml2.so.2.* | head -1)
+          LIBXML2_FILE=$(ls libxml2.so.2.* 2>/dev/null | head -1)
+          if [ -z "$LIBXML2_FILE" ]; then
+          echo "ERROR: libxml2 versioned file not found in dist/lib"
+          ls -la libxml2* || true
+          exit 1
+          fi
           ln -sf "$LIBXML2_FILE" libxml2.so.2
           ln -sf "$LIBXML2_FILE" libxml2.so
           cd -
