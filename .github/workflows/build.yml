@@ -335,11 +335,18 @@ jobs:
             find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu -name "$lib" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
           done
 
-          # Copy our custom-built libxml2 2.15.1 (overrides any system version copied above)
-          echo "Copying custom libxml2 ${{ steps.get-libxml2.outputs.libxml2_latest }}..."
-          find /usr/local/lib -name "libxml2.so*" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
-
-          # Verify libxml2 version in dist
+          echo "Copying custom libxml2 ${LIBXML2_VERSION}..."
+          cp -P /usr/local/lib/libxml2.so.2.${LIBXML2_VERSION} dist/lib/ 2>/dev/null || \
+          find /usr/local/lib -name "libxml2.so.2.*.*" -exec cp -v {} dist/lib/ \;
+          
+          # Create symlinks
+          cd dist/lib
+          LIBXML2_FILE=$(ls libxml2.so.2.* | head -1)
+          ln -sf "$LIBXML2_FILE" libxml2.so.2
+          ln -sf "$LIBXML2_FILE" libxml2.so
+          cd -
+          
+          # Verify
           echo "libxml2 in dist/lib:"
           ls -la dist/lib/libxml2*
 
