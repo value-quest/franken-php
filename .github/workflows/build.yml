@@ -94,12 +94,13 @@ jobs:
         run: |
           LIBXML2_LATEST=$(curl -s https://api.github.com/repos/GNOME/libxml2/releases/latest | jq -r '.tag_name' | sed 's/v//')
           echo "libxml2_latest=$LIBXML2_LATEST" >> $GITHUB_OUTPUT
+          echo "LIBXML2_VERSION=$LIBXML2_LATEST" >> $GITHUB_ENV
           echo "Latest libxml2: $LIBXML2_LATEST"    
 
-      - name: Build libxml2 ${{ steps.get-libxml2.outputs.libxml2_latest }} from source
+      - name: Build libxml2 from source
         run: |
           cd /tmp
-          LIBXML2_VERSION="${{ steps.get-libxml2.outputs.libxml2_latest }}"
+          echo "Building libxml2 ${LIBXML2_VERSION}"
           curl -L https://github.com/GNOME/libxml2/archive/refs/tags/v${LIBXML2_VERSION}.tar.gz -o libxml2.tar.gz
           tar -xzf libxml2.tar.gz
           cd libxml2-${LIBXML2_VERSION}
