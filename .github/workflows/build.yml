@@ -335,23 +335,10 @@ jobs:
             find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu -name "$lib" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
           done
 
+          # Copy our custom-built libxml2 (must come last to override system version)
           echo "Copying libxml2 ${LIBXML2_VERSION}..."
-          cp -v /usr/local/lib/libxml2.so* dist/lib/ 2>/dev/null || true
-      
-          # Recreate symlinks correctly
-          cd dist/lib
-          LIBXML2_FILE=$(ls libxml2.so.*.* 2>/dev/null | head -1)
-          if [ -z "$LIBXML2_FILE" ]; then
-            echo "ERROR: libxml2 versioned file not found in dist/lib"
-            ls -la libxml2* || true
-            exit 1
-          fi
-          LIBXML2_SONAME=$(objdump -p "$LIBXML2_FILE" | grep SONAME | awk '{print $2}')
-          echo "libxml2 soname: $LIBXML2_SONAME"
-          ln -sf "$LIBXML2_FILE" "$LIBXML2_SONAME"
-          ln -sf "$LIBXML2_FILE" libxml2.so
-          cd -
-      
+          find /usr/local/lib -name "libxml2.so*" -exec cp -v {} dist/lib/ \; 2>/dev/null || true
+          
           # Verify
           echo "libxml2 in dist/lib:"
           ls -la dist/lib/libxml2*
