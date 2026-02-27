@@ -272,16 +272,16 @@ jobs:
             # Copy Node.js binary
             cp $(which node) dist/bin/
 
-            # Get npm prefix and copy npm modules
-            NPM_PREFIX=$(npm config get prefix)
+            # Get npm that ships with Node
+            NODE_PREFIX=$(dirname $(dirname $(which node)))
             mkdir -p dist/lib/node_modules
-
-            # Copy npm (must match Node.js version)
-            if [ -d "$NPM_PREFIX/lib/node_modules/npm" ]; then
-              echo "Copying npm from $NPM_PREFIX/lib/node_modules/npm"
-              cp -rL "$NPM_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
+            
+            if [ -d "$NODE_PREFIX/lib/node_modules/npm" ]; then
+              echo "Copying npm from $NODE_PREFIX/lib/node_modules/npm (matches Node $(node --version))"
+              cp -rL "$NODE_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
             else
-              echo "ERROR: npm modules not found at $NPM_PREFIX/lib/node_modules/npm"
+              echo "ERROR: npm not found at $NODE_PREFIX/lib/node_modules/npm"
+              find "$NODE_PREFIX" -name "npm-cli.js" 2>/dev/null
               exit 1
             fi
 
