@@ -284,13 +284,19 @@ jobs:
               find "$NODE_PREFIX" -name "npm-cli.js" 2>/dev/null
               exit 1
             fi
+          
+            # NodeSource ships npm with a broken nested minipass 3.x inside minipass-sized
+            # which conflicts with minipass-sized's requirement for minipass ^7.x
+            echo "Removing conflicting nested minipass from minipass-sized..."
+            rm -rf "dist/lib/node_modules/npm/node_modules/minipass-sized/node_modules/minipass"
+            echo "Done"
 
             # Verify npm was copied correctly
             if [ ! -f "dist/lib/node_modules/npm/bin/npm-cli.js" ]; then
               echo "ERROR: npm-cli.js not found after copying"
               exit 1
             fi
-
+          
             # Create npm wrapper
             cat > dist/bin/npm << 'EOF'
           #!/bin/bash
