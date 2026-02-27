@@ -278,7 +278,7 @@ jobs:
             
             if [ -d "$NODE_PREFIX/lib/node_modules/npm" ]; then
               echo "Copying npm from $NODE_PREFIX/lib/node_modules/npm (matches Node $(node --version))"
-              cp -rL "$NODE_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
+              cp -r "$NODE_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
             else
               echo "ERROR: npm not found at $NODE_PREFIX/lib/node_modules/npm"
               find "$NODE_PREFIX" -name "npm-cli.js" 2>/dev/null
