@@ -92,7 +92,9 @@ jobs:
       - name: Get latest libxml2 version
         id: get-libxml2
         run: |
-          LIBXML2_LATEST=$(curl -s "https://api.github.com/repos/GNOME/libxml2/tags" | jq -r '[.[] | select(.name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first | .name | ltrimstr("v")')
+          LIBXML2_LATEST=$(curl -s "https://api.github.com/repos/GNOME/libxml2/tags" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" | \
+            jq -r '[.[] | select(.name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first | .name | ltrimstr("v")')
           echo "libxml2_latest=$LIBXML2_LATEST" >> $GITHUB_OUTPUT
           echo "LIBXML2_VERSION=$LIBXML2_LATEST" >> $GITHUB_ENV
           echo "Latest libxml2: $LIBXML2_LATEST"   
