@@ -119,8 +119,6 @@ npx create-react-app my-app
 │   └── ...
 ├── lib/              # Shared libraries
 ├── libexec/          # Git helper programs
-├── Caddyfile         # Example server configuration
-├── index.php         # PHP info demo
 ├── install.sh        # New installation script
 ├── update.sh         # Update existing installation script
 └── README.md
@@ -194,7 +192,7 @@ The update script automatically:
 Create a `php.ini` file in your project directory to customize PHP settings.
 
 ### Server Configuration
-Edit the included `Caddyfile` or create your own:
+Create a `Caddyfile` with the following content:
 ```caddyfile
 example.com {
     root * /path/to/public

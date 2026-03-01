@@ -396,30 +396,6 @@ jobs:
           LD_LIBRARY_PATH="$PWD/lib" ./bin/php.real -r "echo 'libxml2 version: ' . LIBXML_DOTTED_VERSION . PHP_EOL;"
           # Should show 2.15.1
 
-      - name: Create demo files
-        run: |
-          # Create index.php
-          cat > dist/index.php << EOF
-          <?php
-          echo "FrankenPHP v${FRANKENPHP_VERSION} with PHP " . PHP_VERSION . "\\n";
-          echo "Composer: " . trim(shell_exec(\$_SERVER['PWD'] . "/bin/composer --version")) . "\\n\\n";
-          echo "PHP Extensions:\\n";
-          \$extensions = get_loaded_extensions();
-          sort(\$extensions);
-          echo implode(", ", \$extensions) . "\\n";
-          ?>
-          EOF
-          
-          # Create Caddyfile
-          cat > dist/Caddyfile << 'EOF'
-          
-          localhost:8000 {
-              root * .
-              encode gzip
-              php_server
-          }
-          EOF
-
       # Create install script (renamed from update.sh)
       - name: Create install script
         run: |
