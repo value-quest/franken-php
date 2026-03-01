@@ -178,7 +178,11 @@ jobs:
             --with-sqlite3 \
             --with-zlib \
             --enable-pcntl \
-            --enable-soap
+            --enable-soap \
+            --enable-exif \
+            --enable-opcache \
+            --enable-sockets
+           
           make -j$(nproc)
           sudo make install
           sudo ldconfig
