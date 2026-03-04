@@ -170,7 +170,6 @@ jobs:
             --enable-dom \
             --enable-fileinfo \
             --enable-filter \
-            --enable-hash \
             --enable-pdo \
             --with-pdo-sqlite \
             --with-pdo-mysql \
@@ -179,7 +178,6 @@ jobs:
             --enable-tokenizer \
             --enable-bcmath \
             --with-zip \
-            --with-gd \
             --enable-gd \
             --with-freetype \
             --with-jpeg \
