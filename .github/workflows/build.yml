@@ -728,7 +728,7 @@ jobs:
           - Git, sqlite3, zip/unzip
           
           ## PHP Extensions
-          Core, DOM, MB, XML, PDO, MySQL, SQLite, GD, Zlib, Curl, OpenSSL, BCMath, Intl, PCNTL, and more.
+          bcmath, ctype, curl, dom, exif, fileinfo, filter, gd (freetype, jpeg), hash, intl, mbstring, mysqli, opcache, openssl, pcntl, pdo, pdo_mysql, pdo_sqlite, session, soap, sockets, sqlite3, tokenizer, xml, zip, zlib
 
           ## libxml2
           Compiled from source (latest release).
