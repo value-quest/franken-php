@@ -8,7 +8,6 @@ No further installation is needed to run your PHP app!
 1. Extract the tarball:
    ```bash
    tar -xzf frankenphp-linux-amd64-php8*.tar.gz
-   cd frankenphp-*
    ```
 
 2. Install (choose one):
@@ -73,7 +72,7 @@ After installation, these commands are available globally:
 
 ### Basic Web Server
 ```bash
-# Start server with included Caddyfile
+# Start server
 frankenphp run
 
 # Use custom Caddyfile
@@ -129,7 +128,7 @@ npx create-react-app my-app
 This build includes all extensions needed for modern PHP applications:
 
 ### Core Extensions
-- **Essentials**: ctype, date, dom, filter, hash, json, libxml, mbstring, pcre, PDO, session, SPL, standard, tokenizer, xml
+- **Essentials**: ctype, date, dom, filter, hash, json, libxml, mbstring, pcre, session, SPL, standard, tokenizer, xml
 - **Process Control**: pcntl (required for Laravel Octane)
 - **Internationalization**: intl
 
@@ -141,11 +140,13 @@ This build includes all extensions needed for modern PHP applications:
 - **HTTP**: curl, openssl
 - **Compression**: zlib, zip
 - **Graphics**: gd (with JPEG, PNG, FreeType support)
+- **Sockets**: sockets
 
 ### Additional Features
 - **Math**: bcmath
-- **File Info**: fileinfo
-- **XML**: SimpleXML, xmlreader, xmlwriter, xsl
+- **File Info**: fileinfo, exif
+- **Web Services**: soap
+- **Performance**: opcache
 
 ## Laravel Octane Support
 
