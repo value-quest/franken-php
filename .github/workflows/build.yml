@@ -48,12 +48,16 @@ jobs:
         id: get-php-versions
         run: |
           # Get latest PHP 8.4.x version
-          PHP84_LATEST=$(curl -s 'https://www.php.net/releases/index.php?json&version=8.4' | jq -r '.version')
+          PHP84_LATEST=$(curl -s "https://api.github.com/repos/php/php-src/tags?per_page=100" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" | \
+            jq -r '[.[] | select(.name | test("^php-8\\.4\\.[0-9]+$"))] | first | .name | ltrimstr("php-")')
           echo "php84_latest=$PHP84_LATEST" >> $GITHUB_OUTPUT
           echo "Latest PHP 8.4: $PHP84_LATEST"
 
           # Get latest PHP 8.5.x version
-          PHP85_LATEST=$(curl -s 'https://www.php.net/releases/index.php?json&version=8.5' | jq -r '.version')
+          PHP85_LATEST=$(curl -s "https://api.github.com/repos/php/php-src/tags?per_page=100" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" | \
+            jq -r '[.[] | select(.name | test("^php-8\\.5\\.[0-9]+$"))] | first | .name | ltrimstr("php-")')
           echo "php85_latest=$PHP85_LATEST" >> $GITHUB_OUTPUT
           echo "Latest PHP 8.5: $PHP85_LATEST"
 
