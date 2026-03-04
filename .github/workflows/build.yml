@@ -87,7 +87,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential curl ca-certificates \
             pkg-config libssl-dev zlib1g-dev libbrotli-dev \
-            autoconf automake libtool libsqlite3-dev libcurl4-openssl-dev libonig-dev \
+            autoconf automake libtool re2c libsqlite3-dev libcurl4-openssl-dev libonig-dev \
             libmariadb-dev libmariadb-dev-compat \
             libzip-dev libpng-dev libjpeg-dev libfreetype6-dev \
             libicu-dev libxslt1-dev sqlite3 zip unzip git \
