@@ -154,6 +154,7 @@ jobs:
       - name: Configure and Build PHP
         run: |
           cd php-${{ env.PHP_VERSION }}/
+          ./buildconf --force
           PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" \
           ./configure \
             --enable-embed \
