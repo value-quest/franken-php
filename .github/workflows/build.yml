@@ -825,7 +825,6 @@ jobs:
             ## Quick Install
             ```bash
             tar -xzf frankenphp-linux-amd64-php85.tar.gz
-            cd frankenphp-*
             ./install.sh
             source ~/.bash_profile
             ```
