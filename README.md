@@ -6,6 +6,7 @@ No further installation is needed to run your PHP app!
 ## Installation
 
 1. Extract the tarball:
+
    ```bash
    tar -xzf frankenphp-linux-amd64-php8*.tar.gz
    ```
@@ -13,15 +14,67 @@ No further installation is needed to run your PHP app!
 2. Install (choose one):
 
    **System-wide installation (recommended for servers):**
+
    ```bash
    sudo ./install.sh
    ```
 
    **User installation (for development):**
+
    ```bash
    ./install.sh
    source ~/.bash_profile
    ```
+
+## Multi-Version Installation (Build Servers)
+
+For build servers that need multiple PHP versions installed side-by-side, use the `--versioned` option.
+
+This installs the distribution into:
+
+```bash
+~/frankenphp/php<version>
+~/frankenphp/php<version>
+```
+
+without modifying your default shell environment or replacing existing installations.
+
+### Install a PHP version
+
+```bash
+mkdir -p ~/frankenphp/php8.4
+cd ~/frankenphp/php8.4
+
+tar -xzf ~/frankenphp-linux-amd64-php84.tar.gz
+
+./install.sh --versioned <version>
+```
+
+### Using a Specific PHP Version
+
+Temporarily prepend the desired version to your PATH:
+
+```bash
+export PATH="$HOME/frankenphp/php<version>/bin:$PATH"
+
+php -v
+composer --version
+node -v
+npm -v
+```
+
+This automatically switches:
+
+* `php`
+* `composer`
+* `frankenphp`
+* `node`
+* `npm`
+* `npx`
+* `git`
+* all included tools
+
+The build/deploy scripts can select the appropriate version automatically based on `composer.json`.
 
 ## Updates
 
@@ -39,18 +92,43 @@ sudo ./update.sh     # System-wide
 ./update.sh          # User installation
 ```
 
+### Multi-Version Updates
+
+For versioned build-server installations:
+
+```bash
+cd ~/frankenphp/php8.4
+./update.sh --versioned 8.4
+
+cd ~/frankenphp/php8.5
+./update.sh --versioned 8.5
+```
+
+The update script replaces the installation atomically while preserving other installed PHP versions.
+
 ## Installation Scripts
 
-- **install.sh** - For new installations only. Detects existing installations and redirects to update.sh
-- **update.sh** - For updating existing installations. Includes automatic service management:
-    - Stops FrankenPHP processes gracefully
-    - Creates backup before updating
-    - Replaces all binaries and libraries
-    - Restarts Supervisor services automatically
+* **install.sh**
+
+    * New installations
+    * Supports `--versioned`
+    * Detects existing installations and redirects to update.sh
+
+* **update.sh**
+
+    * Updates existing installations
+    * Supports `--versioned`
+    * Includes automatic service management for standard installations:
+
+        * Stops FrankenPHP processes gracefully
+        * Creates backup before updating
+        * Replaces all binaries and libraries
+        * Restarts Supervisor services automatically
 
 ## Quick Start
 
 After installation, test immediately:
+
 ```bash
 frankenphp run
 # Visit http://localhost:8000
@@ -59,18 +137,20 @@ frankenphp run
 ## Available Commands
 
 After installation, these commands are available globally:
-- `frankenphp` - FrankenPHP web server
-- `php` - PHP 8.x CLI
-- `composer` - PHP package manager
-- `node` - Node.js runtime
-- `npm` / `npx` - Node.js package managers
-- `git` - Version control
-- `sqlite3` - SQLite database CLI
-- `zip` / `unzip` - Archive utilities
+
+* `frankenphp` - FrankenPHP web server
+* `php` - PHP 8.x CLI
+* `composer` - PHP package manager
+* `node` - Node.js runtime
+* `npm` / `npx` - Node.js package managers
+* `git` - Version control
+* `sqlite3` - SQLite database CLI
+* `zip` / `unzip` - Archive utilities
 
 ## Usage Examples
 
 ### Basic Web Server
+
 ```bash
 # Start server
 frankenphp run
@@ -83,6 +163,7 @@ frankenphp run --config Caddyfile --adapter caddyfile --listen :8090
 ```
 
 ### PHP Development
+
 ```bash
 # Run PHP scripts
 php script.php
@@ -97,6 +178,7 @@ composer require laravel/framework
 ```
 
 ### Node.js Development
+
 ```bash
 # Run Node.js demo
 node demo.js
@@ -107,7 +189,8 @@ npx create-react-app my-app
 ```
 
 ## Directory Structure
-```
+
+```text
 .
 ├── bin/              # All executables
 │   ├── frankenphp    # Self-contained wrapper
@@ -125,45 +208,52 @@ npx create-react-app my-app
 
 ## PHP Extensions
 
-This build includes all extensions needed for modern PHP applications:
+This build includes all extensions needed for modern PHP applications.
 
 ### Core Extensions
-- **Essentials**: ctype, date, dom, filter, hash, json, libxml, mbstring, pcre, session, SPL, standard, tokenizer, xml
-- **Process Control**: pcntl (required for Laravel Octane)
-- **Internationalization**: intl
+
+* **Essentials**: ctype, date, dom, filter, hash, json, libxml, mbstring, pcre, session, SPL, standard, tokenizer, xml
+* **Process Control**: pcntl (required for Laravel Octane)
+* **Internationalization**: intl
 
 ### Database Support
-- **MySQL/MariaDB**: mysqli, mysqlnd, pdo_mysql
-- **SQLite**: sqlite3, pdo_sqlite
+
+* **MySQL/MariaDB**: mysqli, mysqlnd, pdo_mysql
+* **SQLite**: sqlite3, pdo_sqlite
 
 ### Web & Network
-- **HTTP**: curl, openssl
-- **Compression**: zlib, zip
-- **Graphics**: gd (with JPEG, PNG, FreeType support)
-- **Sockets**: sockets
+
+* **HTTP**: curl, openssl
+* **Compression**: zlib, zip
+* **Graphics**: gd (with JPEG, PNG, FreeType support)
+* **Sockets**: sockets
 
 ### Additional Features
-- **Math**: bcmath
-- **File Info**: fileinfo, exif
-- **Web Services**: soap
-- **Performance**: opcache
+
+* **Math**: bcmath
+* **File Info**: fileinfo, exif
+* **Web Services**: soap
+* **Performance**: opcache
 
 ## Laravel Octane Support
 
 This distribution includes full support for Laravel Octane with:
-- ext-pcntl for process management
-- ZTS (Zend Thread Safety) enabled
-- Compatible with Supervisor and systemd
+
+* ext-pcntl for process management
+* ZTS (Zend Thread Safety) enabled
+* Compatible with Supervisor and systemd
 
 ## System-wide Installation Benefits
 
 With system-wide installation (`sudo ./install.sh`):
-- Works with process managers (Supervisor, systemd)
-- Available for all users
-- No environment setup needed
-- Binaries available at `/usr/local/bin/`
+
+* Works with process managers (Supervisor, systemd)
+* Available for all users
+* No environment setup needed
+* Binaries available at `/usr/local/bin/`
 
 Example Supervisor configuration:
+
 ```ini
 [program:laravel-worker]
 command=/usr/local/bin/php /path/to/artisan queue:work
@@ -177,23 +267,27 @@ autorestart=true
 For production servers using Supervisor, the recommended update process:
 
 1. Extract new version
-2. Run update script (may disconnect SSH)
-3. Reconnect and verify versions
-4. Restart supervisor: `sudo service supervisor restart`
+2. Run update script
+3. Verify versions
+4. Restart Supervisor if needed
 
 The update script automatically:
-- Creates backups in `/tmp/frankenphp-backup-TIMESTAMP`
-- Stops running FrankenPHP processes
-- Replaces all binaries including Node.js
-- Handles library dependencies
+
+* Creates backups
+* Stops running FrankenPHP processes
+* Replaces all binaries including Node.js
+* Handles library dependencies
 
 ## Custom Configuration
 
 ### PHP Configuration
+
 Create a `php.ini` file in your project directory to customize PHP settings.
 
 ### Server Configuration
+
 Create a `Caddyfile` with the following content:
+
 ```caddyfile
 example.com {
     root * /path/to/public
@@ -205,25 +299,49 @@ example.com {
 ## Troubleshooting
 
 ### Command Not Found
-- For user installation: Run `source ~/.bash_profile`
-- For system installation: Commands should work immediately
+
+* For user installation: Run `source ~/.bash_profile`
+* For system installation: Commands should work immediately
+
+### Versioned Installation Not Found
+
+Verify the selected PATH:
+
+```bash
+echo $PATH
+which php
+which composer
+```
+
+Expected:
+
+```bash
+/home/administrator/frankenphp/php8.4/bin/php
+```
 
 ### Port Conflicts
-- Default port is 8000 (changed from 8080)
-- Change in Caddyfile: `localhost:9090`
+
+* Default port is 8000
+* Change in Caddyfile: `localhost:9090`
 
 ### Update Issues
-- Check for completion marker: `cat /tmp/frankenphp-update-complete`
-- Restore from backup if needed: `/tmp/frankenphp-backup-TIMESTAMP`
-- For SSH disconnections during updates, reconnect and verify with `php -v`
+
+* Verify versions after updating:
+
+  ```bash
+  php -v
+  composer --version
+  node -v
+  ```
 
 ### Library Errors
-- The distribution includes self-contained wrappers that handle library paths automatically
-- For system-wide issues, reinstall with: `sudo ./install.sh`
+
+The distribution includes self-contained wrappers that automatically configure library paths.
 
 ## Development Tools
 
 ### Git Workflow
+
 ```bash
 git init
 git add .
@@ -232,6 +350,7 @@ git push origin main
 ```
 
 ### Database Operations
+
 ```bash
 sqlite3 database.db
 .tables
@@ -239,6 +358,7 @@ sqlite3 database.db
 ```
 
 ### Archive Management
+
 ```bash
 zip -r project.zip project/
 unzip project.zip
@@ -247,6 +367,7 @@ unzip project.zip
 ## Uninstallation
 
 ### System-wide
+
 ```bash
 sudo rm -f /usr/local/bin/{frankenphp,php,composer,node,npm,npx,git,sqlite3,zip,unzip}
 sudo rm -f /usr/local/bin/*.real
@@ -264,14 +385,23 @@ sudo rm -f /usr/local/lib/libphp.so* \
     /usr/local/lib/libfreetype.so.*
 sudo ldconfig
 ```
+
 ### User Installation
 
 ```bash
 rm -rf ~/bin ~/lib ~/libexec
-````
+```
+
+### Versioned Installation
+
+```bash
+rm -rf ~/frankenphp/php8.4
+rm -rf ~/frankenphp/php8.5
+```
 
 ## License
-- FrankenPHP: MIT License
-- PHP: PHP License
-- Composer: MIT License
-- Node.js: MIT License
+
+* FrankenPHP: MIT License
+* PHP: PHP License
+* Composer: MIT License
+* Node.js: MIT License
