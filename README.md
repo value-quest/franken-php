@@ -264,14 +264,11 @@ sudo rm -f /usr/local/lib/libphp.so* \
     /usr/local/lib/libfreetype.so.*
 sudo ldconfig
 ```
-
 ### User Installation
-Remove from `~/.bash_profile`:
-```
-# FrankenPHP environment setup
-...
-# End of FrankenPHP environment setup
-```
+
+```bash
+rm -rf ~/bin ~/lib ~/libexec
+````
 
 ## License
 - FrankenPHP: MIT License
