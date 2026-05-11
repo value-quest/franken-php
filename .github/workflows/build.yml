@@ -327,8 +327,14 @@ jobs:
               echo ""
               echo "Versioned install completed."
               echo "Test:"
-              echo "  $target/bin/php -v"
-              echo "  $target/bin/composer --version"
+              echo "  export PATH="$target/bin:\$PATH" -v"
+              echo "  which php"
+              echo ""
+              echo "  which composer"
+              echo "  composer --version"
+              echo ""
+              echo "  which node"
+              echo "  node -v"
           }
 
           stop_services() {
