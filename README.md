@@ -45,9 +45,9 @@ without modifying your default shell environment or replacing existing installat
 mkdir -p ~/frankenphp/php8.4
 cd ~/frankenphp/php8.4
 
-tar -xzf ~/frankenphp-linux-amd64-php84.tar.gz
+tar -xzf ~/frankenphp-linux-amd64-php<version.tar.gz
 
-./install.sh --versioned <version>
+./install.sh --versioned <version with dot (e.g. 8.4)>
 ```
 
 ### Using a Specific PHP Version
@@ -389,7 +389,7 @@ sudo ldconfig
 ### User Installation
 
 ```bash
-rm -rf ~/bin ~/lib ~/libexec
+rm -rf ~/bin/{composer,frankenphp,frankenphp.real,git,git.real,node,npm,npx,php,php.real,php-config,phpize,sqlite3,unzip,zip} ~/lib ~/libexec
 ```
 
 ### Versioned Installation
