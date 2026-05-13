@@ -328,7 +328,7 @@ jobs:
               echo "Versioned install completed."
               echo "Test"
               echo "-------------------------------"
-              echo "export PATH="$target/bin:\$PATH"
+              echo "export PATH=\"$target/bin:\$PATH\""
               echo "which php"
               echo "php -v"
               echo ""
@@ -417,16 +417,6 @@ jobs:
                   install_versioned
                   exit 0
               fi
-
-              echo "This will install FrankenPHP to:"
-              echo "  $HOME/bin"
-              echo "  $HOME/lib"
-              echo "  $HOME/libexec"
-              echo ""
-
-              printf "Continue? [y/N] "
-              read -r REPLY
-              [[ ! "$REPLY" =~ ^[Yy]$ ]] && echo "Cancelled" && exit 1
 
               stop_services
               remove_everything
