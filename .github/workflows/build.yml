@@ -328,7 +328,7 @@ jobs:
               echo "Versioned install completed."
               echo "Test"
               echo "-------------------------------"
-              echo "export PATH="$target/bin:\$PATH"
+              echo "export PATH=\"$target/bin:\$PATH\""
               echo "which php"
               echo "php -v"
               echo ""
