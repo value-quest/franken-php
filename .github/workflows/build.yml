@@ -94,14 +94,24 @@ jobs:
           go-version: '1.24'
           cache: false
 
-      - name: Install Node.js 24
+      - name: Download Node.js 24
         run: |
-          sudo apt-get remove -y nodejs npm || true
-          sudo rm -rf /usr/local/lib/node_modules /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx || true
-          curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
-          sudo apt-get install -y nodejs
-          node --version
-          npm --version
+          NODE_MAJOR=24
+          NODE_VERSION=$(curl -fsSL https://nodejs.org/dist/index.json | \
+            jq -r --arg major "v${NODE_MAJOR}." '[.[] | select(.version | startswith($major))][0].version')
+          echo "Resolved Node.js version: $NODE_VERSION"
+
+          ARCHIVE="node-${NODE_VERSION}-linux-x64.tar.xz"
+          curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/${ARCHIVE}" -o "$ARCHIVE"
+          curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/SHASUMS256.txt" -o SHASUMS256.txt
+          grep " ${ARCHIVE}\$" SHASUMS256.txt | sha256sum -c -
+
+          mkdir -p "$RUNNER_TEMP/node"
+          tar xJf "$ARCHIVE" -C "$RUNNER_TEMP/node" --strip-components=1
+
+          echo "NODE_PREFIX=$RUNNER_TEMP/node" >> $GITHUB_ENV
+          "$RUNNER_TEMP/node/bin/node" --version
+          "$RUNNER_TEMP/node/bin/node" "$RUNNER_TEMP/node/lib/node_modules/npm/bin/npm-cli.js" --version
 
       - name: Download PHP source
         run: |
@@ -209,9 +219,8 @@ jobs:
             chmod +x dist/bin/git
           fi
 
-          if command -v node >/dev/null; then
-            cp "$(which node)" dist/bin/
-            NODE_PREFIX=$(dirname "$(dirname "$(which node)")")
+          if [ -x "$NODE_PREFIX/bin/node" ]; then
+            cp "$NODE_PREFIX/bin/node" dist/bin/
             mkdir -p dist/lib/node_modules
             cp -r "$NODE_PREFIX/lib/node_modules/npm" dist/lib/node_modules/
 
