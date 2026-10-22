@@ -11,7 +11,7 @@ on:
 
 jobs:
   check-new-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       latest_version: ${{ steps.get-latest.outputs.latest_version }}
       has_new_version: ${{ steps.check-new.outputs.has_new_version }}
@@ -79,7 +79,7 @@ jobs:
       ARCH: ${{ matrix.arch.name }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: |
@@ -92,7 +92,7 @@ jobs:
             libicu-dev libxslt1-dev sqlite3 zip unzip git python3-dev
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v7
         with:
           go-version: '1.24'
           cache: false
@@ -350,7 +350,7 @@ jobs:
           cd ..
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frankenphp-${{ env.ARCH }}-${{ env.PHP_SHORT }}
           path: frankenphp-linux-${{ env.ARCH }}-${{ env.PHP_SHORT }}.tar.gz
@@ -359,7 +359,7 @@ jobs:
   create-release:
     needs: [check-new-release, build-php]
     if: ${{ always() && needs.build-php.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
 
@@ -367,10 +367,10 @@ jobs:
       FRANKENPHP_VERSION: ${{ needs.check-new-release.outputs.latest_version }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-artifacts/
 
@@ -381,7 +381,7 @@ jobs:
           ls -la release-files/
 
       - name: Create release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           files: release-files/*
           tag_name: v${{ env.FRANKENPHP_VERSION }}
