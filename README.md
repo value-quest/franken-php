@@ -5,10 +5,12 @@ No further installation is needed to run your PHP app!
 
 ## Installation
 
+Releases are built for `amd64` (`x86_64`) and `arm64` (`aarch64`). Pick the tarball matching `uname -m`.
+
 1. Extract the tarball:
 
    ```bash
-   tar -xzf frankenphp-linux-amd64-php8*.tar.gz
+   tar -xzf frankenphp-linux-<amd64|arm64>-php8*.tar.gz
    ```
 
 2. Install (choose one):
@@ -82,10 +84,10 @@ For existing installations, use the update script instead of install.sh:
 
 ```bash
 # Get new version (head over to Releases)
-wget https://github.com/value-quest/franken-php/releases/download/v[FrankenPHP version]/frankenphp-linux-amd64-php[8.4 / 8.5].tar.gz
+wget https://github.com/value-quest/franken-php/releases/download/v[FrankenPHP version]/frankenphp-linux-[amd64 / arm64]-php[84 / 85].tar.gz
 
 # Extract new version
-tar -xzf frankenphp-linux-amd64-php8*.tar.gz
+tar -xzf frankenphp-linux-*-php8*.tar.gz
 
 # Update existing installation
 sudo ./update.sh     # System-wide
@@ -120,10 +122,13 @@ The update script replaces the installation atomically while preserving other in
     * Supports `--versioned`
     * Includes automatic service management for standard installations:
 
-        * Stops FrankenPHP processes gracefully
-        * Creates backup before updating
-        * Replaces all binaries and libraries
-        * Restarts Supervisor services automatically
+        * Runs the new binaries before touching anything, so a broken or wrong-architecture package aborts without downtime
+        * Finds the Supervisor program or systemd unit that runs the web server (FrankenPHP or Octane) and stops it through that service manager
+        * Replaces binaries and libraries, keeping other files in `~/bin` (e.g. a deploy script)
+        * Links Octane's `<app>/frankenphp` to `~/bin/frankenphp`
+        * Starts the same unit again and waits until FrankenPHP runs the new binaries and `libphp.so` (`VERIFY_TIMEOUT`, default 60s)
+        * Keeps the previous installation as `~/{bin,lib,libexec}.old` until verification succeeds, and prints rollback steps if it fails
+        * Warns about other processes still on the old version, such as queue workers
 
 ## Quick Start
 
@@ -273,10 +278,22 @@ For production servers using Supervisor, the recommended update process:
 
 The update script automatically:
 
-* Creates backups
-* Stops running FrankenPHP processes
+* Verifies the new package runs on this machine before stopping anything
+* Stops and restarts the web server's Supervisor program or systemd unit (sudo needs `supervisorctl status`, `stop` and `start` for that program)
 * Replaces all binaries including Node.js
-* Handles library dependencies
+* Checks that the restarted server actually runs the new PHP version
+
+### Laravel Octane
+
+Octane runs `<app>/frankenphp` when that file exists, which would shadow the updated binary.
+Make it a symlink to the distribution and keep your deploy from overwriting it:
+
+```bash
+ln -sfn ~/bin/frankenphp ~/app/frankenphp
+rsync ... --exclude=/frankenphp ...
+```
+
+`update.sh` creates or repairs the symlink for every running Octane app it finds (or `OCTANE_APP_DIR`).
 
 ## Custom Configuration
 

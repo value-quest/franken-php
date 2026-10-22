@@ -58,12 +58,15 @@ jobs:
 
   build-php:
     needs: check-new-release
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.arch.runner }}
     permissions:
       contents: write
 
     strategy:
       matrix:
+        arch:
+          - { name: 'amd64', runner: 'ubuntu-24.04', node: 'x64' }
+          - { name: 'arm64', runner: 'ubuntu-24.04-arm', node: 'arm64' }
         php:
           - { version: '${{ needs.check-new-release.outputs.php84_latest }}', short: 'php84', minor: '8.4' }
           - { version: '${{ needs.check-new-release.outputs.php85_latest }}', short: 'php85', minor: '8.5' }
@@ -73,6 +76,7 @@ jobs:
       PHP_VERSION: ${{ matrix.php.version }}
       PHP_SHORT: ${{ matrix.php.short }}
       PHP_MINOR: ${{ matrix.php.minor }}
+      ARCH: ${{ matrix.arch.name }}
 
     steps:
       - uses: actions/checkout@v4
@@ -100,7 +104,7 @@ jobs:
             jq -r --arg major "v${NODE_MAJOR}." '[.[] | select(.version | startswith($major))][0].version')
           echo "Resolved Node.js version: $NODE_VERSION"
 
-          ARCHIVE="node-${NODE_VERSION}-linux-x64.tar.xz"
+          ARCHIVE="node-${NODE_VERSION}-linux-${{ matrix.arch.node }}.tar.xz"
           curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/${ARCHIVE}" -o "$ARCHIVE"
           curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/SHASUMS256.txt" -o SHASUMS256.txt
           grep " ${ARCHIVE}\$" SHASUMS256.txt | sha256sum -c -
@@ -276,178 +280,22 @@ jobs:
           EOF
           chmod +x dist/bin/frankenphp
 
-      - name: Create install.sh
+      - name: Add install.sh and update.sh
         run: |
-          cat > dist/install.sh << 'EOF'
-          #!/bin/bash
-          set -e
+          cp scripts/install.sh dist/install.sh
+          cp scripts/install.sh dist/update.sh
+          chmod +x dist/install.sh dist/update.sh
 
-          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-          exec 1>&2
-
-          VERSIONED_INSTALL=false
-          PHP_VERSION=""
-
-          if [ "${1:-}" = "--versioned" ]; then
-              VERSIONED_INSTALL=true
-              PHP_VERSION="${2:-}"
-
-              if [[ ! "$PHP_VERSION" =~ ^8\.[0-9]+$ ]]; then
-                  echo "Usage: ./install.sh --versioned 8.4|8.5"
-                  exit 1
-              fi
-          fi
-
-          show_versions() {
-              echo "=== NEW VERSIONS ==="
-              echo "  FrankenPHP: $(cd "$SCRIPT_DIR" && LD_LIBRARY_PATH="$SCRIPT_DIR/lib" ./bin/frankenphp.real version 2>/dev/null | head -1 || echo 'included')"
-              echo "  PHP: $(cd "$SCRIPT_DIR" && LD_LIBRARY_PATH="$SCRIPT_DIR/lib" ./bin/php.real --version 2>/dev/null | head -1 || echo 'included')"
-              echo "  Node.js: $(cd "$SCRIPT_DIR" && ./bin/node --version 2>/dev/null || echo 'included')"
-              echo "  Composer: $(cd "$SCRIPT_DIR" && LD_LIBRARY_PATH="$SCRIPT_DIR/lib" ./bin/composer --version 2>/dev/null | head -1 || echo 'included')"
-              echo ""
-          }
-
-          install_versioned() {
-              local target="$HOME/frankenphp/php$PHP_VERSION"
-              local tmp="$target.new"
-              local backup="$target.backup.$(date +%Y%m%d-%H%M%S)"
-
-              echo "Installing versioned FrankenPHP PHP $PHP_VERSION"
-              echo "Target: $target"
-              echo ""
-
-              rm -rf "$tmp"
-              mkdir -p "$tmp"
-
-              cp -r "$SCRIPT_DIR/bin" "$tmp/"
-              cp -r "$SCRIPT_DIR/lib" "$tmp/"
-              [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec" "$tmp/"
-
-              chmod +x "$tmp/bin/"*
-
-              if [ -d "$target" ]; then
-                  mv "$target" "$backup"
-                  echo "Previous version backed up to: $backup"
-              fi
-
-              mv "$tmp" "$target"
-
-              echo ""
-              echo "Versioned install completed."
-              echo "Test"
-              echo "-------------------------------"
-              echo "export PATH=\"$target/bin:\$PATH\""
-              echo "which php"
-              echo "php -v"
-              echo ""
-              echo "which composer"
-              echo "composer --version"
-              echo ""
-              echo "which node"
-              echo "  node -v"
-          }
-
-          stop_services() {
-              echo "Stopping FrankenPHP processes..."
-              pkill -u "$USER" -f frankenphp 2>/dev/null || true
-              sleep 3
-          }
-
-          remove_everything() {
-              echo "Removing existing user installation..."
-              rm -rf "$HOME/bin" "$HOME/lib" "$HOME/libexec"
-
-              if [ "$EUID" -eq 0 ]; then
-                  rm -f /usr/local/bin/{frankenphp,php,composer,node,npm,npx,git,sqlite3,zip,unzip}
-                  rm -f /usr/local/bin/*.real
-                  rm -rf /usr/local/lib/node_modules /usr/local/libexec/git-core
-                  rm -f /usr/local/lib/libphp.so*
-                  rm -f /etc/ld.so.conf.d/frankenphp.conf
-                  ldconfig 2>/dev/null || true
-              fi
-          }
-
-          install_fresh() {
-              echo "Installing fresh to user directory..."
-
-              mkdir -p "$HOME/bin.new" "$HOME/lib.new"
-              cp -r "$SCRIPT_DIR/bin"/* "$HOME/bin.new/"
-              cp -r "$SCRIPT_DIR/lib"/* "$HOME/lib.new/"
-              [ -d "$SCRIPT_DIR/libexec" ] && cp -r "$SCRIPT_DIR/libexec" "$HOME/libexec.new"
-
-              [ -d "$HOME/bin" ] && mv "$HOME/bin" "$HOME/bin.old" 2>/dev/null || true
-              mv "$HOME/bin.new" "$HOME/bin"
-
-              [ -d "$HOME/lib" ] && mv "$HOME/lib" "$HOME/lib.old" 2>/dev/null || true
-              mv "$HOME/lib.new" "$HOME/lib"
-
-              if [ -d "$HOME/libexec.new" ]; then
-                  [ -d "$HOME/libexec" ] && mv "$HOME/libexec" "$HOME/libexec.old" 2>/dev/null || true
-                  mv "$HOME/libexec.new" "$HOME/libexec"
-              fi
-
-              rm -rf "$HOME/bin.old" "$HOME/lib.old" "$HOME/libexec.old"
-              chmod +x "$HOME/bin"/*
-          }
-
-          update_profile() {
-              local profile="$HOME/.bash_profile"
-              local marker="# FrankenPHP environment setup"
-
-              if [ -f "$profile" ] && grep -q "$marker" "$profile"; then
-                  sed -i.bak "/^$marker/,/^# End of FrankenPHP environment setup/d" "$profile"
-              fi
-
-              [ ! -f "$profile" ] && cat > "$profile" << 'EOFPROFILE'
-          if [ -f ~/.profile ]; then . ~/.profile; fi
-          if [ -f ~/.bashrc ]; then . ~/.bashrc; fi
-          EOFPROFILE
-
-              cat >> "$profile" << EOFPROFILE
-          $marker
-          export PATH="$HOME/bin:\$PATH"
-          # End of FrankenPHP environment setup
-          EOFPROFILE
-          }
-
-          main() {
-              echo "franken-php install"
-              echo "==================="
-
-              if [ ! -f "$SCRIPT_DIR/bin/frankenphp.real" ]; then
-                  echo "Error: Cannot find frankenphp.real in $SCRIPT_DIR/bin/"
-                  exit 1
-              fi
-
-              show_versions
-
-              if [ "$VERSIONED_INSTALL" = true ]; then
-                  install_versioned
-                  exit 0
-              fi
-
-              stop_services
-              remove_everything
-              install_fresh
-              update_profile
-
-              echo ""
-              echo "INSTALL COMPLETED"
-              echo "Run: source ~/.bash_profile"
-              echo "Then test: php -v && node -v && frankenphp version"
-          }
-
-          main "$@"
-          EOF
-          chmod +x dist/install.sh
-
-      - name: Create update.sh
+      - name: Smoke test install and update
         run: |
-          cp dist/install.sh dist/update.sh
-          sed -i 's/franken-php install/franken-php update/g' dist/update.sh
-          sed -i 's/INSTALL COMPLETED/UPDATE COMPLETED/g' dist/update.sh
-          sed -i 's/Usage: \.\/install.sh --versioned/Usage: .\/update.sh --versioned/g' dist/update.sh
-          chmod +x dist/update.sh
+          # Exercises the scripts' own checks: the packaged binaries run and the
+          # installed ones report the packaged PHP version.
+          SMOKE_HOME="$RUNNER_TEMP/smoke-home"
+          mkdir -p "$SMOKE_HOME"
+          HOME="$SMOKE_HOME" ./dist/install.sh
+          HOME="$SMOKE_HOME" ./dist/update.sh
+          HOME="$SMOKE_HOME" ./dist/update.sh --versioned "$PHP_MINOR"
+          test "$("$SMOKE_HOME/bin/php" -r 'echo PHP_VERSION;')" = "$PHP_VERSION"
 
       - name: Create README
         run: |
@@ -498,14 +346,14 @@ jobs:
       - name: Create archive
         run: |
           cd dist
-          tar -czf ../frankenphp-linux-amd64-${PHP_SHORT}.tar.gz .
+          tar -czf ../frankenphp-linux-${ARCH}-${PHP_SHORT}.tar.gz .
           cd ..
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: frankenphp-${{ env.PHP_SHORT }}
-          path: frankenphp-linux-amd64-${{ env.PHP_SHORT }}.tar.gz
+          name: frankenphp-${{ env.ARCH }}-${{ env.PHP_SHORT }}
+          path: frankenphp-linux-${{ env.ARCH }}-${{ env.PHP_SHORT }}.tar.gz
           retention-days: 7
 
   create-release:
@@ -548,6 +396,10 @@ jobs:
 
             - `frankenphp-linux-amd64-php84.tar.gz`
             - `frankenphp-linux-amd64-php85.tar.gz`
+            - `frankenphp-linux-arm64-php84.tar.gz`
+            - `frankenphp-linux-arm64-php85.tar.gz`
+
+            Pick `amd64` or `arm64` to match `uname -m` (`x86_64` / `aarch64`).
 
             ## Normal install
 
