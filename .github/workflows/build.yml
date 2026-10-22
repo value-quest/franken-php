@@ -91,12 +91,6 @@ jobs:
             libzip-dev libpng-dev libjpeg-dev libfreetype6-dev \
             libicu-dev libxslt1-dev sqlite3 zip unzip git python3-dev
 
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version: '1.24'
-          cache: false
-
       - name: Download Node.js 24
         run: |
           NODE_MAJOR=24
@@ -169,6 +163,13 @@ jobs:
       - name: Download FrankenPHP
         run: |
           curl -L https://github.com/php/frankenphp/archive/refs/tags/v${FRANKENPHP_VERSION}.tar.gz | tar xz
+
+      # setup-go sets GOTOOLCHAIN=local, so install the version FrankenPHP requires
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: frankenphp-${{ env.FRANKENPHP_VERSION }}/caddy/go.mod
+          cache: false
 
       - name: Build FrankenPHP
         working-directory: frankenphp-${{ env.FRANKENPHP_VERSION }}/caddy/frankenphp
