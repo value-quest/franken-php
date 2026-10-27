@@ -4,7 +4,20 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+
+# The installation, the server processes and their user services belong to
+# the user, so under sudo run as that user (it still uses sudo for system
+# services) rather than updating /root.
+if [ "$EUID" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+    exec sudo -u "$SUDO_USER" -H -- "$SCRIPT_DIR/$(basename "$0")" "$@"
+fi
+
 exec 1>&2
+
+# Extracting the package into $HOME (wget, tar, ./update.sh in ~) has already
+# replaced bin, lib and libexec, so there is nothing to swap or roll back to.
+IN_PLACE=false
+[ "$SCRIPT_DIR" -ef "$HOME" ] && IN_PLACE=true
 
 case "$(basename "$0")" in
     update.sh) MODE=update ;;
@@ -56,7 +69,7 @@ show_versions() {
     echo "  FrankenPHP: $(cd "$SCRIPT_DIR" && LD_LIBRARY_PATH="$SCRIPT_DIR/lib" ./bin/frankenphp.real version 2>/dev/null | head -1 || echo 'included')"
     echo "  PHP: $(cd "$SCRIPT_DIR" && LD_LIBRARY_PATH="$SCRIPT_DIR/lib" ./bin/php.real --version 2>/dev/null | head -1 || echo 'included')"
     echo "  Node.js: $(cd "$SCRIPT_DIR" && ./bin/node --version 2>/dev/null || echo 'included')"
-    echo "  Composer: $(cd "$SCRIPT_DIR" && LD_LIBRARY_PATH="$SCRIPT_DIR/lib" ./bin/composer --version 2>/dev/null | head -1 || echo 'included')"
+    echo "  Composer: $(cd "$SCRIPT_DIR" && LD_LIBRARY_PATH="$SCRIPT_DIR/lib" ./bin/php.real ./bin/composer --version 2>/dev/null | head -1 || echo 'included')"
     echo ""
 }
 
@@ -222,7 +235,7 @@ runs_from() {
     local maps old
 
     maps=$(cat "/proc/$1/maps" 2>/dev/null) || return 0
-    old=$(grep -oE "$HOME/(bin|lib)\.old/[^ ]+|[^ ]*(frankenphp|libphp)[^ ]* \(deleted\)" <<< "$maps" | head -1)
+    old=$(grep -oE "$HOME/(bin|lib)\.old/[^ ]+|[^ ]*(frankenphp|libphp|php\.real)[^ ]* \(deleted\)" <<< "$maps" | head -1)
     if [ -n "$old" ]; then
         echo "$old"
     elif [[ "$maps" == *" $HOME/bin/frankenphp.real"* && "$maps" == *" $HOME/lib/libphp.so"* ]]; then
@@ -268,20 +281,50 @@ verify_running() {
     fail "after ${VERIFY_TIMEOUT}s no FrankenPHP process runs from $HOME/bin (${SERVICES[*]})"
 }
 
-# Lists other processes still executing the replaced binaries, e.g. queue
-# workers, which are left alone so they can finish their current job.
-report_stale_processes() {
-    local pid found=""
+# Restarts other processes still executing the replaced binaries, e.g. queue
+# workers and Litestream. Queue workers get queue:restart, so they finish their
+# current job before their service starts them again on the new PHP; other
+# processes are restarted through their service. Lists what is left over.
+restart_stale_processes() {
+    local pid running cmdline artisan app service left=""
+    local queue_apps=() stale_services=()
 
     for pid in $(pgrep -u "$EUID" -f '\.real( |$)' || true); do
-        [[ "$(runs_from "$pid")" == "$HOME/"*.old/* ]] || continue
-        found+=$'\n'"  PID $pid: $(tr '\0' ' ' < "/proc/$pid/cmdline" | cut -c1-120)"
+        running=$(runs_from "$pid")
+        [[ "$running" == "$HOME/"*.old/* || "$running" == *" (deleted)" ]] || continue
+        cmdline=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null) || continue
+
+        if [[ "$cmdline" == *"artisan queue:work"* ]]; then
+            artisan=$(grep -oE '[^ ]*artisan queue:work' <<< "$cmdline" | head -1)
+            artisan=${artisan% queue:work}
+            [[ "$artisan" == /* ]] || artisan="$(readlink "/proc/$pid/cwd")/$artisan" || continue
+            app=$(dirname "$artisan")
+            [[ " ${queue_apps[*]} " == *" $app "* ]] || queue_apps+=("$app")
+            continue
+        fi
+
+        service=$(service_of_pid "$pid" 2>/dev/null) || service=""
+        if [ -n "$service" ]; then
+            [[ " ${stale_services[*]} " == *" $service "* ]] || stale_services+=("$service")
+        else
+            left+=$'\n'"  PID $pid: ${cmdline:0:120}"
+        fi
     done
 
-    if [ -n "$found" ]; then
+    for app in "${queue_apps[@]}"; do
+        echo "Restarting queue workers of $app after their current job..."
+        (cd "$app" && "$HOME/bin/php" artisan queue:restart) ||
+            left+=$'\n'"  queue workers of $app (php artisan queue:restart failed)"
+    done
+
+    for service in "${stale_services[@]}"; do
+        echo "Restarting $service..."
+        service_ctl restart "$service" || left+=$'\n'"  $service (restart failed)"
+    done
+
+    if [ -n "$left" ]; then
         echo ""
-        echo "Warning: these processes still run the previous version:$found"
-        echo "Restart them (queue workers: php artisan queue:restart)."
+        echo "Warning: these still run the previous version, restart them yourself:$left"
     fi
 }
 
@@ -352,6 +395,11 @@ remove_everything() {
 install_tree() {
     local dir
 
+    if [ "$IN_PLACE" = true ]; then
+        echo "Package was extracted into $HOME, files are already in place."
+        return 0
+    fi
+
     echo "Installing to $HOME..."
 
     for dir in bin lib libexec; do
@@ -410,16 +458,22 @@ main() {
         exit 0
     fi
 
+    # Updating a user who has no installation, e.g. root in a root shell,
+    # would install next to the real one and find none of its processes.
+    if [ "$MODE" = update ] && [ ! -f "$HOME/bin/frankenphp.real" ]; then
+        fail "no installation found in $HOME, nothing was changed."$'\n'"Run update.sh as the user that owns the installation (sudo ./update.sh switches to it)."
+    fi
+
     stop_services
-    [ "$MODE" = install ] && remove_everything
+    [ "$MODE" = install ] && [ "$IN_PLACE" = false ] && remove_everything
     install_tree
-    [ "$MODE" = update ] && SWAPPED=true
+    [ "$MODE" = update ] && [ "$IN_PLACE" = false ] && SWAPPED=true
     update_profile
     verify_installed "$HOME"
     link_octane_binary
     start_services
     verify_running
-    report_stale_processes
+    restart_stale_processes
     rm -rf "$HOME/bin.old" "$HOME/lib.old" "$HOME/libexec.old"
 
     echo ""

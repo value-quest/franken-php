@@ -90,9 +90,10 @@ wget https://github.com/value-quest/franken-php/releases/download/v[FrankenPHP v
 tar -xzf frankenphp-linux-*-php8*.tar.gz
 
 # Update existing installation
-sudo ./update.sh     # System-wide
-./update.sh          # User installation
+./update.sh          # or: sudo ./update.sh (runs as your user, updates ~/bin)
 ```
+
+Extracting the tarball into `~` and running `./update.sh` there works too; the files are then already in place and there is no previous version to roll back to.
 
 ### Multi-Version Updates
 
@@ -128,7 +129,7 @@ The update script replaces the installation atomically while preserving other in
         * Links Octane's `<app>/frankenphp` to `~/bin/frankenphp`
         * Starts the same unit again and waits until FrankenPHP runs the new binaries and `libphp.so` (`VERIFY_TIMEOUT`, default 60s)
         * Keeps the previous installation as `~/{bin,lib,libexec}.old` until verification succeeds, and prints rollback steps if it fails
-        * Warns about other processes still on the old version, such as queue workers
+        * Restarts other processes still on the old version: queue workers via `php artisan queue:restart` (after their current job), others such as Litestream through their Supervisor program or systemd unit
 
 ## Quick Start
 
@@ -274,14 +275,14 @@ For production servers using Supervisor, the recommended update process:
 1. Extract new version
 2. Run update script
 3. Verify versions
-4. Restart Supervisor if needed
 
 The update script automatically:
 
 * Verifies the new package runs on this machine before stopping anything
-* Stops and restarts the web server's Supervisor program or systemd unit (sudo needs `supervisorctl status`, `stop` and `start` for that program)
+* Stops and restarts the web server's Supervisor program or systemd unit (sudo needs `supervisorctl status`, `stop`, `start` and `restart`)
 * Replaces all binaries including Node.js
 * Checks that the restarted server actually runs the new PHP version
+* Restarts queue workers and other programs still running the previous PHP
 
 ### Laravel Octane
 
