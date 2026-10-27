@@ -129,7 +129,8 @@ The update script replaces the installation atomically while preserving other in
         * Links Octane's `<app>/frankenphp` to `~/bin/frankenphp`
         * Starts the same unit again and waits until FrankenPHP runs the new binaries and `libphp.so` (`VERIFY_TIMEOUT`, default 60s)
         * Keeps the previous installation as `~/{bin,lib,libexec}.old` until verification succeeds, and prints rollback steps if it fails
-        * Restarts other processes still on the old version: queue workers via `php artisan queue:restart` (after their current job), others such as Litestream through their Supervisor program or systemd unit
+        * Restarts queue workers still on the old version via `php artisan queue:restart` (after their current job) and lists other processes still on it
+        * Starts Supervisor programs running from `~/bin` that Supervisor gave up on (`FATAL`), shows all programs and warns about any of them not running
 
 ## Quick Start
 
@@ -282,7 +283,8 @@ The update script automatically:
 * Stops and restarts the web server's Supervisor program or systemd unit (sudo needs `supervisorctl status`, `stop`, `start` and `restart`)
 * Replaces all binaries including Node.js
 * Checks that the restarted server actually runs the new PHP version
-* Restarts queue workers and other programs still running the previous PHP
+* Restarts queue workers still running the previous PHP
+* Starts Supervisor programs that are `FATAL` and shows the status of all programs
 
 ### Laravel Octane
 

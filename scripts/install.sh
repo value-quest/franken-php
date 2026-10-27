@@ -281,13 +281,14 @@ verify_running() {
     fail "after ${VERIFY_TIMEOUT}s no FrankenPHP process runs from $HOME/bin (${SERVICES[*]})"
 }
 
-# Restarts other processes still executing the replaced binaries, e.g. queue
-# workers and Litestream. Queue workers get queue:restart, so they finish their
-# current job before their service starts them again on the new PHP; other
-# processes are restarted through their service. Lists what is left over.
+# Restarts queue workers still executing the replaced binaries with
+# queue:restart, so they finish their current job before their service starts
+# them again on the new PHP. Other such processes, e.g. litestream:replicate
+# which only supervises the Litestream binary, keep working on the old PHP and
+# are only listed.
 restart_stale_processes() {
-    local pid running cmdline artisan app service left=""
-    local queue_apps=() stale_services=()
+    local pid running cmdline artisan app left=""
+    local queue_apps=()
 
     for pid in $(pgrep -u "$EUID" -f '\.real( |$)' || true); do
         running=$(runs_from "$pid")
@@ -303,12 +304,7 @@ restart_stale_processes() {
             continue
         fi
 
-        service=$(service_of_pid "$pid" 2>/dev/null) || service=""
-        if [ -n "$service" ]; then
-            [[ " ${stale_services[*]} " == *" $service "* ]] || stale_services+=("$service")
-        else
-            left+=$'\n'"  PID $pid: ${cmdline:0:120}"
-        fi
+        left+=$'\n'"  PID $pid: ${cmdline:0:120}"
     done
 
     for app in "${queue_apps[@]}"; do
@@ -317,14 +313,77 @@ restart_stale_processes() {
             left+=$'\n'"  queue workers of $app (php artisan queue:restart failed)"
     done
 
-    for service in "${stale_services[@]}"; do
-        echo "Restarting $service..."
-        service_ctl restart "$service" || left+=$'\n'"  $service (restart failed)"
-    done
-
     if [ -n "$left" ]; then
         echo ""
-        echo "Warning: these still run the previous version, restart them yourself:$left"
+        echo "Still on the previous version (restart them if they need the new PHP):$left"
+    fi
+}
+
+# Prints the Supervisor programs whose command runs from this installation.
+installation_programs() {
+    local conf
+
+    for conf in /etc/supervisor/supervisord.conf /etc/supervisor/conf.d/* /etc/supervisord.conf /etc/supervisord.d/*; do
+        [ -f "$conf" ] || continue
+        cat "$conf" 2>/dev/null || as_root cat "$conf" 2>/dev/null || true
+    done | awk -v bin="$HOME/bin/" '
+        /^\[program:/ { name = substr($0, 10); sub(/\].*/, "", name); next }
+        /^\[/         { name = ""; next }
+        name != "" && /^command *=/ && index($0, bin) { print name }'
+}
+
+# Whether $1, a process as supervisorctl names it (group:name, name_00 with
+# numprocs), belongs to one of the programs in $2.
+is_installation_program() {
+    local process=${1#*:} program
+
+    while read -r program; do
+        [[ -n "$program" && ( "$process" == "$program" || "$process" == "$program"_* ) ]] && return 0
+    done <<< "$2"
+    return 1
+}
+
+# Starts the programs of this installation that Supervisor gave up on (FATAL),
+# e.g. because an earlier update removed their binary, then shows all programs
+# and warns about those of this installation that are not running.
+check_supervisor() {
+    local programs status name state not_running deadline=$((SECONDS + 15))
+
+    command -v supervisorctl >/dev/null || return 0
+    status=$(as_root supervisorctl status 2>/dev/null || true)
+    [ -n "$status" ] || return 0
+    programs=$(installation_programs)
+    [ -n "$programs" ] || return 0
+
+    while read -r name state _; do
+        [ "$state" = FATAL ] && is_installation_program "$name" "$programs" || continue
+        echo "Starting $name, which Supervisor had given up on..."
+        as_root supervisorctl start "$name" < /dev/null || true
+    done <<< "$status"
+
+    # Restarted queue workers and programs pass through STARTING and BACKOFF
+    while :; do
+        status=$(as_root supervisorctl status 2>/dev/null || true)
+        not_running=""
+        while read -r name state _; do
+            is_installation_program "$name" "$programs" || continue
+            [ "$state" = RUNNING ] || not_running+=" $name ($state)"
+        done <<< "$status"
+        [[ -z "$not_running" || "$not_running" != *"(STARTING)"* && "$not_running" != *"(BACKOFF)"* ]] && break
+        [ "$SECONDS" -ge "$deadline" ] && break
+        sleep 1
+    done
+
+    echo ""
+    echo "Supervisor programs:"
+    sed 's/^/  /' <<< "$status"
+
+    if [ -n "$not_running" ]; then
+        echo ""
+        echo "Warning: these programs of this installation are not running:$not_running"
+        echo "Check: sudo supervisorctl tail <program> stderr"
+    else
+        echo "All Supervisor programs running from $HOME/bin are RUNNING."
     fi
 }
 
@@ -474,6 +533,7 @@ main() {
     start_services
     verify_running
     restart_stale_processes
+    check_supervisor
     rm -rf "$HOME/bin.old" "$HOME/lib.old" "$HOME/libexec.old"
 
     echo ""
