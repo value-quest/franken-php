@@ -180,7 +180,7 @@ stop_services() {
 
         cmdline=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null) || continue
         if [[ "$cmdline" == *"artisan octane:"* ]]; then
-            app=$(readlink "/proc/$pid/cwd" 2>/dev/null) || continue
+            app=$(proc_read readlink "$pid" cwd) || continue
             [[ " ${OCTANE_APPS[*]} " == *" $app "* ]] || OCTANE_APPS+=("$app")
         fi
     done
@@ -227,6 +227,16 @@ link_octane_binary() {
     done
 }
 
+# Runs cat or readlink on /proc/PID/FILE, through sudo when that is denied:
+# a process with capabilities the caller lacks, e.g. a systemd unit with
+# AmbientCapabilities=CAP_NET_BIND_SERVICE or a binary given one by setcap,
+# hides maps, exe and cwd even from its own user.
+proc_read() {
+    local cmd=$1 file="/proc/$2/$3"
+
+    "$cmd" "$file" 2>/dev/null || as_root "$cmd" "$file" 2>/dev/null
+}
+
 # Prints "new" when PID has the new frankenphp and libphp mapped, "php" for
 # the new PHP CLI (an Octane master), or the stale file it runs otherwise.
 # Reads mapped files rather than /proc/PID/exe, which points at the
@@ -234,7 +244,10 @@ link_octane_binary() {
 runs_from() {
     local maps old
 
-    maps=$(cat "/proc/$1/maps" 2>/dev/null) || return 0
+    if ! maps=$(proc_read cat "$1" maps); then
+        [ -e "/proc/$1" ] && echo unreadable
+        return 0
+    fi
     old=$(grep -oE "$HOME/(bin|lib)\.old/[^ ]+|[^ ]*(frankenphp|libphp|php\.real)[^ ]* \(deleted\)" <<< "$maps" | head -1)
     if [ -n "$old" ]; then
         echo "$old"
@@ -243,7 +256,7 @@ runs_from() {
     elif [[ "$maps" == *" $HOME/bin/php.real"* ]]; then
         echo php
     else
-        readlink "/proc/$1/exe" 2>/dev/null || echo unknown
+        proc_read readlink "$1" exe || echo unknown
     fi
 }
 
@@ -251,18 +264,20 @@ runs_from() {
 # least one FrankenPHP process on the new binary and libphp, and no server
 # process left on anything else.
 verify_running() {
-    local deadline=$((SECONDS + VERIFY_TIMEOUT)) pid running ok stale
+    local deadline=$((SECONDS + VERIFY_TIMEOUT)) pid running ok stale unreadable
 
     [ ${#SERVICES[@]} -gt 0 ] || return 0
 
     while :; do
         ok=false
         stale=""
+        unreadable=""
         for pid in $(server_pids); do
             running=$(runs_from "$pid")
             case "$running" in
                 new) ok=true ;;
                 php|"") ;;
+                unreadable) unreadable+=" $pid" ;;
                 *) stale+=$'\n'"  PID $pid: $running" ;;
             esac
         done
@@ -277,6 +292,9 @@ verify_running() {
 
     if [ -n "$stale" ]; then
         fail "after ${VERIFY_TIMEOUT}s the web server still runs other binaries:$stale"
+    fi
+    if [ -n "$unreadable" ]; then
+        fail "after ${VERIFY_TIMEOUT}s the binaries of PID$unreadable could not be checked: /proc/PID/maps is not readable, even with 'sudo -n cat' (${SERVICES[*]})"
     fi
     fail "after ${VERIFY_TIMEOUT}s no FrankenPHP process runs from $HOME/bin (${SERVICES[*]})"
 }
@@ -298,7 +316,7 @@ restart_stale_processes() {
         if [[ "$cmdline" == *"artisan queue:work"* ]]; then
             artisan=$(grep -oE '[^ ]*artisan queue:work' <<< "$cmdline" | head -1)
             artisan=${artisan% queue:work}
-            [[ "$artisan" == /* ]] || artisan="$(readlink "/proc/$pid/cwd")/$artisan" || continue
+            [[ "$artisan" == /* ]] || artisan="$(proc_read readlink "$pid" cwd)/$artisan" || continue
             app=$(dirname "$artisan")
             [[ " ${queue_apps[*]} " == *" $app "* ]] || queue_apps+=("$app")
             continue
