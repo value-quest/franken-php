@@ -538,7 +538,7 @@ main() {
 
     echo ""
     echo "${MODE^^} COMPLETED"
-    echo "Run: source ~/.bash_profile"
+    [ "$MODE" = install ] && echo "Run: source ~/.bash_profile"
     echo "Then test: php -v && node -v && frankenphp version"
 }
 
