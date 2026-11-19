@@ -329,12 +329,26 @@ jobs:
             -s "$(php-config --prefix)/lib" \
             -x dist/bin/frankenphp -x dist/bin/php
 
-          codesign --force --sign - dist/bin/frankenphp dist/bin/php dist/lib/*.dylib
+          MACHO=(dist/bin/frankenphp dist/bin/php dist/lib/*.dylib)
 
-          otool -L dist/bin/frankenphp dist/bin/php dist/lib/*.dylib
-          if otool -L dist/bin/frankenphp dist/bin/php dist/lib/*.dylib |
-              grep -E "$(brew --prefix)/|/usr/local/|$RUNNER_TEMP/"; then
-            echo "Binaries still reference libraries of the build machine"
+          # All references are now @executable_path/../lib/..., so no LC_RPATH
+          # is needed. dylibbundler leaves the build prefix's and adds its own,
+          # sometimes twice, and dyld refuses to load duplicate LC_RPATHs.
+          for file in "${MACHO[@]}"; do
+            for rpath in $(otool -l "$file" | awk '/cmd LC_RPATH/ { getline; getline; print $2 }'); do
+              install_name_tool -delete_rpath "$rpath" "$file" 2>/dev/null || true
+            done
+            if otool -l "$file" | grep -q LC_RPATH; then
+              echo "Could not remove the LC_RPATHs of $file"
+              exit 1
+            fi
+          done
+
+          codesign --force --sign - "${MACHO[@]}"
+
+          otool -L "${MACHO[@]}"
+          if otool -L "${MACHO[@]}" | grep -E "$(brew --prefix)/|/usr/local/|$RUNNER_TEMP/|@rpath/"; then
+            echo "Binaries still reference libraries of the build machine or need an rpath"
             exit 1
           fi
 
