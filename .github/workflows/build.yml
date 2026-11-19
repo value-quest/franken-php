@@ -482,7 +482,15 @@ jobs:
         run: |
           mkdir -p release-files
           find release-artifacts -name "*.tar.gz" -exec mv {} release-files/ \;
+          # machine-readable versions, e.g. for 'igor update': the archives are
+          # re-uploaded into the same release on every run, so tools compare these
+          jq -n --arg frankenphp "$FRANKENPHP_VERSION" --arg php84 "$PHP84_VERSION" --arg php85 "$PHP85_VERSION" \
+            '{frankenphp: $frankenphp, php84: $php84, php85: $php85}' > release-files/versions.json
+          cat release-files/versions.json
           ls -la release-files/
+        env:
+          PHP84_VERSION: ${{ needs.check-new-release.outputs.php84_latest }}
+          PHP85_VERSION: ${{ needs.check-new-release.outputs.php85_latest }}
 
       - name: Create release
         uses: softprops/action-gh-release@v3
@@ -494,7 +502,9 @@ jobs:
           prerelease: false
           generate_release_notes: true
           body: |
-            FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP 8.4 and PHP 8.5.
+            FrankenPHP v${{ env.FRANKENPHP_VERSION }} with PHP ${{ needs.check-new-release.outputs.php84_latest }} and PHP ${{ needs.check-new-release.outputs.php85_latest }}.
+
+            The archives are rebuilt and replaced daily; `versions.json` lists the versions they contain.
 
             ## Downloads
 
