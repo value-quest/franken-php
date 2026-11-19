@@ -200,6 +200,7 @@ jobs:
           if [ "$RUNNER_OS" = macOS ]; then
             make -j"$(sysctl -n hw.ncpu)"
             make install
+            ls -l "$PHP_PREFIX/lib"
           else
             make -j"$(nproc)"
             sudo make install
@@ -223,11 +224,13 @@ jobs:
         working-directory: frankenphp-${{ env.FRANKENPHP_VERSION }}/caddy/frankenphp
         run: |
           if [ "$RUNNER_OS" = macOS ]; then
-            # Brotli comes from Homebrew; dylibbundler rewrites the library
-            # paths when packaging.
+            # libphp is not in a default search path here, unlike /usr/local/lib
+            # on Linux. Brotli comes from Homebrew; dylibbundler rewrites the
+            # library paths when packaging.
             BREW_PREFIX="$(brew --prefix)"
+            PHP_LIB="$(php-config --prefix)/lib"
             CGO_CFLAGS="$(php-config --includes) -I$BREW_PREFIX/include" \
-            CGO_LDFLAGS="$(php-config --ldflags) $(php-config --libs) -L$BREW_PREFIX/lib -Wl,-rpath,$(php-config --prefix)/lib -Wl,-headerpad_max_install_names" \
+            CGO_LDFLAGS="-L$PHP_LIB $(php-config --ldflags) $(php-config --libs) -L$BREW_PREFIX/lib -Wl,-rpath,$PHP_LIB -Wl,-headerpad_max_install_names" \
             go build -tags=nobadger,nomysql,nopgx,nowatcher
           else
             CGO_CFLAGS="$(php-config --includes)" \
