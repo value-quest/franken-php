@@ -555,7 +555,7 @@ main() {
     rm -rf "$HOME/bin.old" "$HOME/lib.old" "$HOME/libexec.old"
 
     echo ""
-    echo "${MODE^^} COMPLETED"
+    echo "$(tr "[:lower:]" "[:upper:]" <<< "$MODE") COMPLETED"
     [ "$MODE" = install ] && echo "Run: source ~/.bash_profile"
     echo "Then test: php -v && node -v && frankenphp version"
 }
